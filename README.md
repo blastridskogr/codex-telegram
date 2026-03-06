@@ -1,8 +1,12 @@
-# codex_telegram
+# codex-telegram
 
-Windows-only patch workflow for running a Telegram-controlled **portable Codex app** with the same in-app session model as Codex Desktop.
+Telegram control surface for a **portable patched Codex Desktop app on Windows**.
+
+[Windows](docs/WINDOWS_PORTABLE_SETUP.md) · [Telegram Bot Setup](docs/TELEGRAM_BOT_SETUP.md) · [Commands](docs/TELEGRAM_COMMANDS.md) · [Security](docs/SECURITY.md)
 
 This repository documents and packages the **patching method**, **Telegram runtime source**, and **setup scripts**. It does **not** ship OpenAI's application binaries.
+
+Keywords: `codex`, `telegram`, `windows`, `portable`, `desktop`, `electron`.
 
 ## What this does
 
@@ -30,7 +34,6 @@ You build the portable package from **your own local Codex installation**.
 
 ## Repo layout
 
-- [patch/telegram-native.js](/C:/skogr_project/codex_telegram/patch/telegram-native.js): native Telegram runtime injected into Codex
 - [patch/telegram-native.js](patch/telegram-native.js): native Telegram runtime injected into Codex
 - [scripts/prepare_portable_package.ps1](scripts/prepare_portable_package.ps1): copies the installed package into a portable worktree and patches the manifest
 - [scripts/inject_native_telegram.mjs](scripts/inject_native_telegram.mjs): injects the Telegram bootstrap into the extracted app bundle
@@ -46,7 +49,7 @@ You build the portable package from **your own local Codex installation**.
 
 ## Quick start
 
-1. Read [docs/TELEGRAM_BOT_SETUP.md](/C:/skogr_project/codex_telegram/docs/TELEGRAM_BOT_SETUP.md) and create your bot.
+1. Read [docs/TELEGRAM_BOT_SETUP.md](docs/TELEGRAM_BOT_SETUP.md) and create your bot.
 2. Install dependencies:
 
 ```powershell
