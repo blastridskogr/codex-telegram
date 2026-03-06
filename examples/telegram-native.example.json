@@ -1,0 +1,19 @@
+{
+  "telegramBotToken": "123456789:replace_me",
+  "allowedChatIds": [
+    "123456789"
+  ],
+  "workspaceRoots": [
+    "C:/path/to/workspace"
+  ],
+  "pollTimeoutSec": 30,
+  "maxReplyChars": 3500,
+  "defaultLanguage": "ko",
+  "defaultSettings": {
+    "model": null,
+    "serviceTier": null,
+    "effort": null,
+    "sandbox": null
+  }
+}
+

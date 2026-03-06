@@ -1,0 +1,16 @@
+node_modules/
+work/
+state/
+logs/
+telegram-inbox/
+portable_userdata/
+*.log
+*.asar
+*.tmp
+*.bak
+telegram-native.json
+chat_bindings.json
+chat_settings.json
+.env
+.env.*
+
