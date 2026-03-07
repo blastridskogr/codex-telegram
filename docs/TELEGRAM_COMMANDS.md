@@ -10,11 +10,14 @@ The runtime supports both the short alias form and the `codex_*` prefixed form.
 | `/status` | `/codex_status` | show runtime health, pipe, bindings path, inbox path, workspace roots |
 | `/controls` | `/codex_controls` | open the main control keyboard |
 | `/current` | `/codex_current` | show current session, model, speed, reasoning, sandbox |
+| `/new [prompt]` | `/codex_new [prompt]` | open a real native Codex new-thread flow |
 | `/session` | `/codex_session` | open the recent-session picker |
 | `/unbind` | `/codex_unbind` | remove the current chat binding |
 
 ## Session commands
 
+- `/new`
+- `/codex_new`
 - `/session`
 - `/sessions`
 - `/bind <session_id>`
@@ -22,6 +25,8 @@ The runtime supports both the short alias form and the `codex_*` prefixed form.
 
 Behavior:
 
+- `/new` does **not** synthesize a fake session. It opens the real Codex new-thread flow.
+- the first Telegram message after `/new` creates the real thread through Codex and auto-binds the returned `conversationId`
 - the picker shows `session title + session id + last activity`
 - when you switch sessions, the full session history is mirrored back into Telegram as display-only chat output
 - the history replay does **not** cost extra model tokens

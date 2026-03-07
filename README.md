@@ -13,6 +13,7 @@ Keywords: `codex`, `telegram`, `windows`, `portable`, `desktop`, `electron`.
 - patches a locally installed Codex Desktop package into a side-by-side portable package
 - injects Telegram control **inside the app process**
 - binds a Telegram chat to a Codex session
+- opens a real Codex **New Thread** and binds the new session from Telegram
 - lets Telegram switch session, model, speed, reasoning, and sandbox
 - mirrors full session history into Telegram when you switch sessions
 
@@ -102,6 +103,7 @@ Short aliases and `codex_*` prefixed commands are both supported.
 
 Examples:
 
+- `/new` or `/codex_new`
 - `/session` or `/codex_session`
 - `/model` or `/codex_model`
 - `/speed` or `/codex_speed`
@@ -113,6 +115,7 @@ Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 
 ## Known behavior
 
+- `/new` opens a real native Codex new-thread flow. The first Telegram message after that creates the real thread and auto-binds the returned session id.
 - Telegram images are currently downgraded to **text + attachment** before they enter Codex. This is intentional to avoid corrupting the Codex session payload.
 - Session switching mirrors the session history back to Telegram as display-only chat messages. This does not spend extra model tokens.
 - The current workflow is tied to the Windows Store build shape of Codex Desktop. If OpenAI changes the bundle layout, the patch scripts may need updates.

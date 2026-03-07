@@ -12,6 +12,7 @@ const DEFAULT_POLL_TIMEOUT_SEC = 30;
 const DEFAULT_MAX_REPLY_CHARS = 3500;
 const DEFAULT_RECENT_SESSION_LIMIT = 10;
 const DEFAULT_CHAT_SETTINGS_FILE = "chat_settings.json";
+const DEFAULT_PENDING_NEW_THREAD_FILE = "pending_new_thread.json";
 const DEFAULT_IPC_CONNECT_TIMEOUT_MS = 30000;
 const DEFAULT_IPC_RETRY_DELAY_MS = 500;
 const DEFAULT_TURN_INJECT_RETRY_COUNT = 3;
@@ -21,6 +22,7 @@ const CODEX_COMMANDS = [
     { command: "codex_help", description: "Show Codex Telegram commands." },
     { command: "codex_controls", description: "Open the Codex control panel." },
     { command: "codex_current", description: "Show the current Codex chat settings." },
+    { command: "codex_new", description: "Open a real Codex New Thread draft in the app." },
     { command: "codex_session", description: "Pick the active Codex session." },
     { command: "codex_model", description: "Pick the Codex model." },
     { command: "codex_speed", description: "Pick the Codex speed." },
@@ -52,6 +54,7 @@ const HELP_MESSAGE = [
     "/help - show commands",
     "/status - show runtime status",
     "/current - show current chat binding",
+    "/new [prompt] - open a real Codex new-thread draft in the app",
     "/session or /sessions - list recent Codex app sessions",
     "/bind <session_id> - bind this chat to a specific session",
     "/unbind - remove the current chat binding",
@@ -698,6 +701,58 @@ class ChatSettingsStore {
         };
         this.save();
         return this.get(normalizedChatId);
+    }
+}
+
+class PendingNewThreadStore {
+    constructor(filePath) {
+        this.filePath = filePath;
+        this.pendingByChat = {};
+        this.load();
+    }
+
+    load() {
+        if (!fs.existsSync(this.filePath)) {
+            this.pendingByChat = {};
+            return;
+        }
+        try {
+            const payload = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+            this.pendingByChat = payload.pending_new_thread || {};
+        } catch {
+            this.pendingByChat = {};
+        }
+    }
+
+    save() {
+        ensureDir(path.dirname(this.filePath));
+        fs.writeFileSync(this.filePath, JSON.stringify({ pending_new_thread: this.pendingByChat }, null, 2), "utf8");
+    }
+
+    get(chatId) {
+        return this.pendingByChat[String(chatId)] || null;
+    }
+
+    set(chatId, patch = {}) {
+        const normalizedChatId = String(chatId);
+        this.pendingByChat[normalizedChatId] = {
+            active: true,
+            updatedAt: new Date().toISOString(),
+            ...this.pendingByChat[normalizedChatId],
+            ...patch,
+        };
+        this.save();
+        return this.pendingByChat[normalizedChatId];
+    }
+
+    clear(chatId) {
+        const normalizedChatId = String(chatId);
+        if (!(normalizedChatId in this.pendingByChat)) {
+            return false;
+        }
+        delete this.pendingByChat[normalizedChatId];
+        this.save();
+        return true;
     }
 }
 
@@ -1489,6 +1544,7 @@ class CodexAppDirectCompanion {
         this.api = new TelegramApi(config.telegramBotToken);
         this.bindings = new SessionBindings(config.bindingsPath);
         this.chatSettings = new ChatSettingsStore(path.join(config.stateDir, DEFAULT_CHAT_SETTINGS_FILE));
+        this.pendingNewThread = new PendingNewThreadStore(path.join(config.stateDir, DEFAULT_PENDING_NEW_THREAD_FILE));
         this.modelCatalog = new ModelCatalog(logger);
         this.catalog = new SessionCatalog(logger);
         this.monitor = new AppBroadcastMonitor(this.api, this.bindings, config, logger);
@@ -1508,6 +1564,7 @@ class CodexAppDirectCompanion {
             { command: "help", description: "Show Codex app direct commands." },
             { command: "status", description: "Show runtime status." },
             { command: "current", description: "Show current chat settings." },
+            { command: "new", description: "Open a real Codex New Thread draft in the app." },
             { command: "session", description: "Pick a recent Codex session." },
             { command: "sessions", description: "Pick a recent Codex session." },
             { command: "controls", description: "Open the Codex control panel." },
@@ -1560,6 +1617,7 @@ class CodexAppDirectCompanion {
 
     formatStatus(chatId = null) {
         const sessionId = chatId != null ? (this.bindings.getSession(chatId) || "(not bound)") : "(n/a)";
+        const pending = chatId != null && this.pendingNewThread.get(chatId)?.active ? "yes" : "no";
         const lines = [
             "Codex Portable Telegram is online.",
             `Pipe: ${this.config.codexIpcPipe}`,
@@ -1567,6 +1625,7 @@ class CodexAppDirectCompanion {
             `Inbox: ${this.config.telegramInboxDir}`,
             `Workspace roots: ${this.config.workspaceRoots.join(", ") || "(none)"}`,
             `Current session: ${sessionId}`,
+            `Pending new thread: ${pending}`,
         ];
         if (chatId != null) {
             lines.push("");
@@ -1580,6 +1639,7 @@ class CodexAppDirectCompanion {
             text: `Codex controls\n\n${this.formatSettingsSummary(chatId)}`,
             replyMarkup: {
                 inline_keyboard: [
+                    [{ text: "New Thread", callback_data: "action:new-thread" }],
                     [{ text: "Session", callback_data: "menu:session" }],
                     [{ text: "Model", callback_data: "menu:model" }],
                     [{ text: "Speed", callback_data: "menu:speed" }],
@@ -1588,6 +1648,114 @@ class CodexAppDirectCompanion {
                 ],
             },
         };
+    }
+
+    async openNewThread(chatId, prompt = "", callbackId = null) {
+        if (callbackId) {
+            await this.api.answerCallbackQuery(callbackId, "Opening new thread");
+        }
+        if (typeof this.config.openNewThread !== "function") {
+            await this.api.sendMessage(chatId, "The native Codex New Thread command is unavailable in this build.");
+            return false;
+        }
+
+        const currentSessionId = this.bindings.getSession(chatId);
+        const normalizedPrompt = String(prompt || "").trim();
+        const preferredCwd = this.config.workspaceRoots[0] || null;
+
+        await this.config.openNewThread({
+            ...(normalizedPrompt ? { prompt: normalizedPrompt } : {}),
+            ...(preferredCwd ? { cwd: preferredCwd } : {}),
+        });
+
+        if (currentSessionId) {
+            this.bindings.unbind(chatId);
+        }
+        this.pendingNewThread.set(chatId, {
+            prompt: normalizedPrompt,
+            cwd: preferredCwd,
+        });
+
+        const lines = [
+            normalizedPrompt
+                ? "Opened a real Codex New Thread draft in the app with the prompt prefilled."
+                : "Opened a real Codex New Thread draft in the app.",
+            currentSessionId
+                ? "This Telegram chat was unbound from the previous session so messages do not go to the wrong thread."
+                : "This Telegram chat is currently unbound.",
+            "Codex creates the new session id when the first turn is sent.",
+            "Send the first message in Codex, then use /session or /codex_session to bind the new thread.",
+        ];
+        await this.api.sendMessage(chatId, lines.join("\n\n"));
+        return true;
+    }
+
+    async startPendingNewThread(chatId, turnPayload) {
+        if (typeof this.config.startNewThreadTurn !== "function") {
+            await this.prefillPendingNewThread(chatId, turnPayload);
+            return false;
+        }
+
+        const pending = this.pendingNewThread.get(chatId) || {};
+        const preferredCwd = pending.cwd || this.config.workspaceRoots[0] || null;
+        const settings = this.chatSettings.get(chatId);
+        const input = Array.isArray(turnPayload?.input) ? turnPayload.input : [];
+        const attachments = Array.isArray(turnPayload?.attachments) ? turnPayload.attachments : [];
+
+        await this.api.sendTyping(chatId);
+        const conversationId = await this.config.startNewThreadTurn({
+            prompt: String(turnPayload?.prompt || "").trim(),
+            input,
+            attachments,
+            cwd: preferredCwd,
+            workspaceRoots: this.config.workspaceRoots,
+            settings,
+        });
+        if (!conversationId) {
+            throw new Error("Codex did not return a real conversation id.");
+        }
+
+        this.pendingNewThread.clear(chatId);
+        this.bindings.bind(chatId, conversationId);
+
+        const suppressionMessage = {
+            text: String(turnPayload?.prompt || "").trim(),
+            images: input.filter((item) => item?.type === "image").map((item) => item.url),
+            attachments,
+        };
+        this.monitor.suppressNextUserMessage(conversationId, buildMirrorFingerprint(suppressionMessage));
+
+        await this.api.sendMessage(chatId, `Created and bound a real Codex thread.\n\nSession: ${conversationId}`);
+        return true;
+    }
+
+    async prefillPendingNewThread(chatId, turnPayload) {
+        if (typeof this.config.openNewThread !== "function") {
+            await this.promptForBinding(chatId);
+            return false;
+        }
+        const pending = this.pendingNewThread.get(chatId) || {};
+        const prompt = String(turnPayload?.prompt || "").trim();
+        if (!prompt) {
+            await this.promptForBinding(chatId);
+            return false;
+        }
+        const preferredCwd = pending.cwd || this.config.workspaceRoots[0] || null;
+        await this.config.openNewThread({
+            prompt,
+            ...(preferredCwd ? { cwd: preferredCwd } : {}),
+        });
+        this.pendingNewThread.set(chatId, {
+            prompt,
+            cwd: preferredCwd,
+        });
+        const lines = [
+            "Updated the real Codex New Thread draft in the app with your latest Telegram message.",
+            "This is still a native draft. Codex creates the session id only when you press Send in Codex.",
+            "After that, use /session or /codex_session to bind the new thread.",
+        ];
+        await this.api.sendMessage(chatId, lines.join("\n\n"));
+        return true;
     }
 
     buildSessionPicker(chatId) {
@@ -1736,6 +1904,9 @@ class CodexAppDirectCompanion {
         if (callbackId) {
             await this.api.answerCallbackQuery(callbackId, result.ok ? "Session updated" : result.message);
         }
+        if (result.ok) {
+            this.pendingNewThread.clear(chatId);
+        }
         await this.api.sendMessage(chatId, `${result.message}\n\n${this.formatSettingsSummary(chatId)}`);
         if (result.ok) {
             await this.sendSessionHistory(chatId, sessionId);
@@ -1812,6 +1983,10 @@ class CodexAppDirectCompanion {
         }
         if (!this.isAuthorized(chatId)) {
             await this.api.answerCallbackQuery(callbackId, "Unauthorized chat.");
+            return;
+        }
+        if (data === "action:new-thread") {
+            await this.openNewThread(chatId, "", callbackId);
             return;
         }
         if (data.startsWith("menu:")) {
@@ -1894,6 +2069,7 @@ class CodexAppDirectCompanion {
                 "Codex commands:",
                 "/codex_controls",
                 "/codex_current",
+                "/codex_new [prompt]",
                 "/codex_session",
                 "/codex_model",
                 "/codex_speed",
@@ -1910,6 +2086,16 @@ class CodexAppDirectCompanion {
         }
         if (text === "/controls" || text === "/codex_controls") {
             await this.showMainControls(chatId);
+            return true;
+        }
+        if (text === "/new" || text.startsWith("/new ")) {
+            const prompt = text === "/new" ? "" : text.slice("/new".length).trim();
+            await this.openNewThread(chatId, prompt);
+            return true;
+        }
+        if (text === "/codex_new" || text.startsWith("/codex_new ")) {
+            const prompt = text === "/codex_new" ? "" : text.slice("/codex_new".length).trim();
+            await this.openNewThread(chatId, prompt);
             return true;
         }
         if (text === "/current" || text === "/codex_current") {
@@ -1958,6 +2144,7 @@ class CodexAppDirectCompanion {
         }
         if (text === "/unbind" || text === "/codex_unbind") {
             const result = this.bindings.unbind(chatId);
+            this.pendingNewThread.clear(chatId);
             await this.api.sendMessage(chatId, result.message);
             return true;
         }
@@ -1983,16 +2170,20 @@ class CodexAppDirectCompanion {
             }
         }
 
-        const sessionId = this.bindings.getSession(chatId);
-        if (!sessionId) {
-            await this.promptForBinding(chatId);
-            return;
-        }
-
         const turnPayload = await this.buildTurnPayloadFromMessage(message);
         if (!turnPayload) {
             return;
         }
+        const sessionId = this.bindings.getSession(chatId);
+        if (!sessionId) {
+            if (this.pendingNewThread.get(chatId)?.active) {
+                await this.startPendingNewThread(chatId, turnPayload);
+                return;
+            }
+            await this.promptForBinding(chatId);
+            return;
+        }
+        this.pendingNewThread.clear(chatId);
         const suppressionMessage = {
             text: turnPayload.prompt,
             images: turnPayload.input.filter((item) => item?.type === "image").map((item) => item.url),
@@ -2057,6 +2248,12 @@ async function bootWithConfigPath(configPath, options = {}) {
     if (typeof options.ensureSessionOpen === "function") {
         config.ensureSessionOpen = options.ensureSessionOpen;
     }
+    if (typeof options.openNewThread === "function") {
+        config.openNewThread = options.openNewThread;
+    }
+    if (typeof options.startNewThreadTurn === "function") {
+        config.startNewThreadTurn = options.startNewThreadTurn;
+    }
     const logger = new OutputLogger(config.logPath);
     const app = new CodexAppDirectCompanion(config, logger);
     await app.start({ dryRun: options.dryRun === true });
@@ -2085,6 +2282,8 @@ async function startNativeTelegramBridge(options = {}) {
     activeNativeStart = bootWithConfigPath(configPath, {
         dryRun: false,
         ensureSessionOpen: options.ensureSessionOpen,
+        openNewThread: options.openNewThread,
+        startNewThreadTurn: options.startNewThreadTurn,
     }).catch((error) => {
         appendBootstrapLog(`[start-error] ${formatError(error)}`);
         activeNativeStart = null;
