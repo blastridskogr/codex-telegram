@@ -586,19 +586,34 @@ function extractHistoryEntry(parsed) {
     if (parsed?.type !== "event_msg") {
         return null;
     }
-    const kind = parsed?.payload?.type;
-    if (kind !== "user_message" && kind !== "agent_message") {
+    const payload = parsed?.payload || {};
+    const kind = payload.type;
+    let role = null;
+    let text = "";
+    let phase = null;
+    let isFinalSummary = false;
+    if (kind === "user_message" || kind === "agent_message") {
+        text = buildSessionHistoryText(parsed);
+        role = kind === "agent_message" ? "assistant" : "user";
+        phase = typeof payload.phase === "string" ? payload.phase : null;
+    } else if (kind === "task_complete" && payload.last_agent_message) {
+        text = String(payload.last_agent_message || "").trim();
+        role = "assistant";
+        phase = "task_complete";
+        isFinalSummary = true;
+    } else {
         return null;
     }
-    const text = buildSessionHistoryText(parsed);
     if (!text || shouldIgnoreSessionText(text)) {
         return null;
     }
     const timestamp = parsed?.timestamp ? new Date(parsed.timestamp) : null;
     return {
-        role: kind === "agent_message" ? "assistant" : "user",
+        role,
         text,
         timestamp: timestamp && !Number.isNaN(timestamp.getTime()) ? timestamp : null,
+        phase,
+        isFinalSummary,
     };
 }
 
@@ -659,8 +674,22 @@ function buildSessionReplaySelection(history, replayedAt = new Date()) {
     const userEntries = sourceHistory.filter((entry) => entry?.role === "user");
     let latestAssistantEntry = null;
     for (const entry of Array.isArray(history) ? history : []) {
-        if (entry?.role === "assistant") {
+        if (entry?.role === "assistant" && entry?.isFinalSummary) {
             latestAssistantEntry = entry;
+        }
+    }
+    if (!latestAssistantEntry) {
+        for (const entry of Array.isArray(history) ? history : []) {
+            if (entry?.role === "assistant" && entry?.phase !== "commentary") {
+                latestAssistantEntry = entry;
+            }
+        }
+    }
+    if (!latestAssistantEntry) {
+        for (const entry of Array.isArray(history) ? history : []) {
+            if (entry?.role === "assistant") {
+                latestAssistantEntry = entry;
+            }
         }
     }
     return { userEntries, latestAssistantEntry };
