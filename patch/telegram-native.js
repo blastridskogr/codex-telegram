@@ -2185,7 +2185,6 @@ class CodexAppDirectCompanion {
             return;
         }
         const replay = this.buildSessionReplayHeader(session, history, { replayedAt: new Date() });
-        await this.sendPlainChunkedText(chatId, replay.header);
         for (const entry of replay.userEntries) {
             await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
             await this.sendReplayHistoryEntry(chatId, entry);
@@ -2203,11 +2202,10 @@ class CodexAppDirectCompanion {
         }
         if (result.ok) {
             this.pendingNewThread.clear(chatId);
-        }
-        await this.api.sendMessage(chatId, `${result.message}\n\n${this.formatSettingsSummary(chatId)}`);
-        if (result.ok) {
             await this.sendSessionHistory(chatId, sessionId);
+            return result;
         }
+        await this.api.sendMessage(chatId, result.message);
         return result;
     }
 
