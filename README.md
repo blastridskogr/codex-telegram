@@ -15,7 +15,7 @@ Keywords: `codex`, `telegram`, `windows`, `portable`, `desktop`, `electron`.
 - binds a Telegram chat to a Codex session
 - opens a real Codex **New Thread** and binds the new session from Telegram
 - lets Telegram switch session, model, speed, reasoning, and permission
-- mirrors full session history into Telegram when you switch sessions
+- mirrors the last 24 hours of session history into Telegram when you switch sessions
 
 ## What this repo intentionally does not include
 
@@ -124,7 +124,7 @@ Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 - sandbox labels describe the Codex write policy, not full OS isolation; `Workspace write` and `Read only` still keep network enabled on the tested build
 - mirrored assistant responses preserve common Markdown formatting in Telegram; user/app echo stays plain text on purpose
 - Telegram images are currently downgraded to **text + attachment** before they enter Codex. This is intentional to avoid corrupting the Codex session payload.
-- Session switching mirrors the session history back to Telegram as display-only chat messages. This does not spend extra model tokens.
+- Session switching mirrors the last 24 hours of session history back to Telegram as display-only chat messages. This does not spend extra model tokens.
 - The current workflow is tied to the Windows Store build shape of Codex Desktop. If OpenAI changes the bundle layout, the patch scripts may need updates.
 
 ## Support

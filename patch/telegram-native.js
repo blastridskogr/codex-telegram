@@ -11,6 +11,7 @@ const DEFAULT_PIPE = "\\\\.\\pipe\\codex-ipc";
 const DEFAULT_POLL_TIMEOUT_SEC = 30;
 const DEFAULT_MAX_REPLY_CHARS = 3500;
 const DEFAULT_RECENT_SESSION_LIMIT = 10;
+const DEFAULT_SESSION_HISTORY_REPLAY_HOURS = 24;
 const DEFAULT_CHAT_SETTINGS_FILE = "chat_settings.json";
 const DEFAULT_PENDING_NEW_THREAD_FILE = "pending_new_thread.json";
 const DEFAULT_IPC_CONNECT_TIMEOUT_MS = 30000;
@@ -619,6 +620,21 @@ function extractTitleFromSessionHead(head) {
 function formatSessionTimestamp(date) {
     const pad = (value) => String(value).padStart(2, "0");
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function filterHistoryForReplayWindow(history, replayedAt, windowHours = DEFAULT_SESSION_HISTORY_REPLAY_HOURS) {
+    const cutoffMs = replayedAt.getTime() - (windowHours * 60 * 60 * 1000);
+    return (history || []).filter((entry) => {
+        const timestamp = entry?.timestamp;
+        if (!timestamp || typeof timestamp.getTime !== "function") {
+            return false;
+        }
+        const value = timestamp.getTime();
+        if (Number.isNaN(value)) {
+            return false;
+        }
+        return value >= cutoffMs;
+    });
 }
 
 function extractPreviewFromSessionTail(tail) {
@@ -2080,16 +2096,20 @@ class CodexAppDirectCompanion {
         return `${prefix}\n${entry.text}`.trim();
     }
 
-    buildSessionTranscript(sessionInfo, history, { recentOnly = null } = {}) {
-        const sourceHistory = recentOnly == null ? history : history.slice(-recentOnly);
+    buildSessionTranscript(sessionInfo, history, { replayedAt = new Date() } = {}) {
+        const sourceHistory = filterHistoryForReplayWindow(history, replayedAt);
         const lines = [
             `# ${sessionInfo?.title || "(untitled session)"}`,
             `Session ID: ${sessionInfo?.sessionId || "-"}`,
             `Last activity: ${sessionInfo?.modifiedAt ? formatSessionTimestamp(sessionInfo.modifiedAt) : "-"}`,
             `Messages: ${history.length}`,
+            `Replay window: last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours`,
         ];
-        if (recentOnly != null && history.length > sourceHistory.length) {
-            lines.push(`Showing last ${sourceHistory.length} messages in chat. Full transcript is attached below.`);
+        if (sourceHistory.length !== history.length) {
+            lines.push(`Replaying ${sourceHistory.length} of ${history.length} messages from the last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours.`);
+        }
+        if (sourceHistory.length === 0) {
+            lines.push(`No session messages were found in the last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours.`);
         }
         for (const entry of sourceHistory) {
             lines.push("");
@@ -2104,7 +2124,7 @@ class CodexAppDirectCompanion {
             await this.api.sendMessage(chatId, `Unable to load session history for ${sessionId}.`);
             return;
         }
-        const fullTranscript = this.buildSessionTranscript(session, history);
+        const fullTranscript = this.buildSessionTranscript(session, history, { replayedAt: new Date() });
         const chunks = splitReplyChunks(fullTranscript, this.config.maxReplyChars);
         for (let index = 0; index < chunks.length; index += 1) {
             await this.api.sendMessage(chatId, chunks[index]);
