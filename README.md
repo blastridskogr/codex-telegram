@@ -17,7 +17,7 @@ Feature overview: [docs/FEATURES.md](docs/FEATURES.md)
 - binds a Telegram chat to a Codex session
 - opens a real Codex **New Thread** and binds the new session from Telegram
 - lets Telegram switch session, model, speed, reasoning, and permission
-- replays only the user inputs and the latest Codex summary from the last 2 hours of session history, anchored to the latest message in that session, when you switch sessions
+- replays only the user inputs from the last 2 hours of session history plus the latest Codex summary from the session when you switch sessions
 
 ## What this repo intentionally does not include
 
@@ -126,7 +126,7 @@ Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 - sandbox labels describe the Codex write policy, not full OS isolation; `Workspace write` and `Read only` still keep network enabled on the tested build
 - mirrored assistant responses preserve common Markdown formatting in Telegram; user/app echo stays plain text on purpose
 - Telegram images are currently downgraded to **text + attachment** before they enter Codex. This is intentional to avoid corrupting the Codex session payload.
-- Session switching replays only the user inputs and the latest Codex summary from the last 2 hours of session history before the latest message in that session back to Telegram as display-only chat messages. This does not spend extra model tokens.
+- Session switching replays only the user inputs from the last 2 hours of session history before the latest message in that session, plus the latest Codex summary from the session, back to Telegram as display-only chat messages. This does not spend extra model tokens.
 - The current workflow is tied to the Windows Store build shape of Codex Desktop. If OpenAI changes the bundle layout, the patch scripts may need updates.
 
 ## Support

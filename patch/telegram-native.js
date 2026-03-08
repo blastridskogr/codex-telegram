@@ -658,7 +658,7 @@ function buildSessionReplaySelection(history, replayedAt = new Date()) {
     const sourceHistory = filterHistoryForReplayWindow(history, replayedAt);
     const userEntries = sourceHistory.filter((entry) => entry?.role === "user");
     let latestAssistantEntry = null;
-    for (const entry of sourceHistory) {
+    for (const entry of Array.isArray(history) ? history : []) {
         if (entry?.role === "assistant") {
             latestAssistantEntry = entry;
         }
@@ -2136,10 +2136,10 @@ class CodexAppDirectCompanion {
             `Messages: ${history.length}`,
             `Replay anchor: ${replayAnchor}`,
             `Replay window: ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message`,
-            "Replay mode: all user inputs in the replay window + latest Codex summary in that window",
+            "Replay mode: all user inputs in the replay window + latest Codex summary in the session",
         ];
         lines.push(`Replaying ${replay.userEntries.length} user messages from the replay window.`);
-        lines.push(replay.latestAssistantEntry ? "Including the latest Codex summary from the replay window." : "No Codex summary was found in the replay window.");
+        lines.push(replay.latestAssistantEntry ? "Including the latest Codex summary from the session." : "No Codex summary was found in the session yet.");
         return {
             header: lines.join("\n"),
             userEntries: replay.userEntries,
