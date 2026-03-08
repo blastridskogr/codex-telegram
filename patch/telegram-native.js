@@ -2496,11 +2496,19 @@ async function bootWithConfigPath(configPath, options = {}) {
     }
     const logger = new OutputLogger(config.logPath);
     const app = new CodexAppDirectCompanion(config, logger);
-    await app.start({ dryRun: options.dryRun === true });
-    return app;
+    activeNativeApp = app;
+    try {
+        await app.start({ dryRun: options.dryRun === true });
+        return app;
+    } finally {
+        if (activeNativeApp === app) {
+            activeNativeApp = null;
+        }
+    }
 }
 
 let activeNativeStart = null;
+let activeNativeApp = null;
 
 async function startNativeTelegramBridge(options = {}) {
     if (activeNativeStart) {
@@ -2532,6 +2540,35 @@ async function startNativeTelegramBridge(options = {}) {
     return activeNativeStart;
 }
 
+async function stopNativeTelegramBridge() {
+    const runningPromise = activeNativeStart;
+    const runningApp = activeNativeApp;
+    if (!runningPromise && !runningApp) {
+        return;
+    }
+
+    activeNativeStart = null;
+
+    if (runningApp) {
+        try {
+            runningApp.disposed = true;
+            await runningApp.dispose();
+        } catch (error) {
+            appendBootstrapLog(`[stop-error] ${formatError(error)}`);
+        }
+    }
+
+    if (runningPromise) {
+        try {
+            await runningPromise.catch(() => {});
+        } finally {
+            if (activeNativeStart === runningPromise) {
+                activeNativeStart = null;
+            }
+        }
+    }
+}
+
 async function main() {
     const args = parseArgs(process.argv);
     await bootWithConfigPath(args.configPath, { dryRun: args.dryRun });
@@ -2547,6 +2584,7 @@ if (require.main === module) {
 
 module.exports = {
     startNativeTelegramBridge,
+    stopNativeTelegramBridge,
     loadConfig,
     CodexAppDirectCompanion,
 };
