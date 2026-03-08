@@ -16,7 +16,13 @@ foreach ($file in $files) {
     continue
   }
 
+  if ($text -match '\b[0-9]{6,}:[A-Za-z0-9_-]{20,}\b') {
+    $problems += "Possible Telegram token: $($file.FullName)"
+  }
   if ($text -match 'bot[0-9]{6,}:[A-Za-z0-9_-]{20,}') {
+    $problems += "Possible Telegram bot URL token: $($file.FullName)"
+  }
+  if ($text -match '"telegramBotToken"\s*:\s*"[^"]+:[^"]+"') {
     $problems += "Possible Telegram token: $($file.FullName)"
   }
   if ($text -match '"allowedChatIds"\s*:\s*\[\s*"[0-9]{5,}"') {

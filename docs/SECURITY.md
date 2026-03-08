@@ -30,6 +30,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\prepublish_secret_check.ps1
 Then manually confirm:
 
 - no token is present in any JSON, Markdown, PowerShell, or log file
+- no bare `123456789:token...` value is present in config or docs, even without a `bot` URL prefix
 - no user-specific `C:\\Users\\<name>` path is committed
 - no live chat id is committed
 
@@ -41,4 +42,3 @@ Rotate it immediately in `@BotFather`:
 2. use `/revoke`
 3. generate a new token
 4. update only your local `telegram-native.json`
-

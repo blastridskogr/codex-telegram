@@ -80,6 +80,12 @@ Supported values:
 - `Workspace write`
 - `Read only`
 
+Current behavior on the tested build:
+
+- `Full access` maps to Codex `danger-full-access`
+- `Workspace write` keeps network enabled and broad read access while limiting writes to the selected workspace roots
+- `Read only` still keeps network enabled and broad read access; the label describes the write policy, not full OS isolation
+
 ## Media behavior
 
 - text messages: injected into the bound Codex session
