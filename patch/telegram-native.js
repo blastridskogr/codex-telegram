@@ -577,6 +577,7 @@ function migrateLegacyConfigToPortable(userDataPath) {
             workspaceRoots: Array.isArray(legacy.workspaceRoots) ? legacy.workspaceRoots : [],
             defaultSettings: {
                 model: legacy.defaultSettings?.model ?? null,
+                serviceTier: legacy.defaultSettings?.serviceTier ?? null,
                 effort: legacy.defaultSettings?.effort ?? null,
                 sandbox: legacy.defaultSettings?.sandbox ?? null,
             },
@@ -1459,12 +1460,12 @@ class AppBroadcastMonitor {
     formatMirrorMessage(role, text) {
         const body = String(text || "").trim();
         if (!body) {
-            return role === "user" ? "[앱 입력]" : "[Codex 응답]";
+            return role === "user" ? "[App Input]" : "[Codex Response]";
         }
         if (role === "user") {
-            return `[앱 입력]\n${body}`;
+            return `[App Input]\n${body}`;
         }
-        return `[Codex 응답]\n${body}`;
+        return `[Codex Response]\n${body}`;
     }
 
     async sendText(chatId, text) {
@@ -2310,3 +2311,4 @@ module.exports = {
     loadConfig,
     CodexAppDirectCompanion,
 };
+

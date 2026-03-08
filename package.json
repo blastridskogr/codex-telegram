@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Patch scripts and docs for running a Telegram-controlled portable Codex app on Windows.",
   "scripts": {
+    "build:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\build_portable.ps1 -SkipNpmInstall",
     "patch:inject": "node scripts/inject_native_telegram.mjs",
     "patch:rebuild": "node scripts/rebuild_patched_asar.mjs",
     "patch:integrity": "node scripts/update_portable_asar_integrity.mjs"
@@ -13,4 +14,3 @@
     "resedit": "^3.0.2"
   }
 }
-

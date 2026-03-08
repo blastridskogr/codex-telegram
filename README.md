@@ -2,7 +2,7 @@
 
 Telegram control surface for a **portable patched Codex Desktop app on Windows**.
 
-[Windows](docs/WINDOWS_PORTABLE_SETUP.md) · [Telegram Bot Setup](docs/TELEGRAM_BOT_SETUP.md) · [Commands](docs/TELEGRAM_COMMANDS.md) · [Security](docs/SECURITY.md)
+[Windows](docs/WINDOWS_PORTABLE_SETUP.md) | [Telegram Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
 This repository documents and packages the **patching method**, **Telegram runtime source**, and **setup scripts**. It does **not** ship OpenAI's application binaries.
 
@@ -36,6 +36,7 @@ You build the portable package from **your own local Codex installation**.
 ## Repo layout
 
 - [patch/telegram-native.js](patch/telegram-native.js): native Telegram runtime injected into Codex
+- [scripts/build_portable.ps1](scripts/build_portable.ps1): one-click portable build pipeline from local Codex install to patched package
 - [scripts/prepare_portable_package.ps1](scripts/prepare_portable_package.ps1): copies the installed package into a portable worktree and patches the manifest
 - [scripts/inject_native_telegram.mjs](scripts/inject_native_telegram.mjs): injects the Telegram bootstrap into the extracted app bundle
 - [scripts/rebuild_patched_asar.mjs](scripts/rebuild_patched_asar.mjs): rebuilds the patched `app.asar`
@@ -51,44 +52,46 @@ You build the portable package from **your own local Codex installation**.
 ## Quick start
 
 1. Read [docs/TELEGRAM_BOT_SETUP.md](docs/TELEGRAM_BOT_SETUP.md) and create your bot.
-2. Install dependencies:
-
-```powershell
-npm install
-```
-
-3. Prepare a portable package from your installed Codex Desktop app:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\prepare_portable_package.ps1
-```
-
-4. Extract the copied `app.asar`:
-
-```powershell
-npx asar extract .\work\portable_package_root_v2\app\resources\app.asar .\work\full_extract
-```
-
-5. Inject the Telegram runtime and rebuild:
-
-```powershell
-node .\scripts\inject_native_telegram.mjs
-node .\scripts\rebuild_patched_asar.mjs
-node .\scripts\update_portable_asar_integrity.mjs
-```
-
-6. Create your local config from [examples/telegram-native.example.json](examples/telegram-native.example.json):
+2. Create your local Telegram config from [examples/telegram-native.example.json](examples/telegram-native.example.json):
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\\CodexPortableData" | Out-Null
 Copy-Item .\examples\telegram-native.example.json "$env:LOCALAPPDATA\\CodexPortableData\\telegram-native.json"
 ```
 
-7. Register and launch the portable package:
+3. Build the patched portable package from your installed Codex Desktop app:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
+```
+
+or:
+
+```powershell
+npm run build:portable
+```
+
+This one command does the full local patch pipeline:
+
+- installs npm dependencies
+- prepares `work\\portable_package_root_v2`
+- extracts `app.asar`
+- injects the Telegram runtime
+- rebuilds `work\\app.patched.asar`
+- copies the rebuilt `app.asar` back into the package root
+- rewrites the Electron integrity metadata
+
+4. Register and launch the portable package:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\register_portable_package.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\launch_portable_codex.ps1 -InstanceName default
+```
+
+If you already created the local config and want one command for build + register + launch:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Register -Launch
 ```
 
 ## Important operating rules
@@ -116,6 +119,7 @@ Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 ## Known behavior
 
 - `/new` opens a real native Codex new-thread flow. The first Telegram message after that creates the real thread and auto-binds the returned session id.
+- the native new-thread path on the tested Codex build exposes `model` and `reasoning` through `startConversation(...)`; `speed/serviceTier` continues to apply on bound-session turns, but not as a separate documented field on that very first new-thread turn
 - Telegram images are currently downgraded to **text + attachment** before they enter Codex. This is intentional to avoid corrupting the Codex session payload.
 - Session switching mirrors the session history back to Telegram as display-only chat messages. This does not spend extra model tokens.
 - The current workflow is tied to the Windows Store build shape of Codex Desktop. If OpenAI changes the bundle layout, the patch scripts may need updates.

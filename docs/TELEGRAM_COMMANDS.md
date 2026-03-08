@@ -50,6 +50,11 @@ Official labels:
 
 Internally this maps to the Codex `serviceTier` field.
 
+Note:
+
+- bound-session turns receive `serviceTier`
+- the very first turn of a native `/new` flow follows Codex's exposed `startConversation(...)` surface on the tested build, which exposes `model` and `reasoning` but not a separate documented `serviceTier` field
+
 ## Reasoning controls
 
 - `/reasoning`
@@ -80,4 +85,3 @@ Supported values:
 - text messages: injected into the bound Codex session
 - documents: injected as attachments
 - images: currently downgraded to `text + attachment` for safety
-
