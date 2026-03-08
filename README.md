@@ -2,11 +2,13 @@
 
 Telegram control surface for a **portable patched Codex Desktop app on Windows**.
 
-[Windows](docs/WINDOWS_PORTABLE_SETUP.md) | [Telegram Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
+[Features](docs/FEATURES.md) | [Windows](docs/WINDOWS_PORTABLE_SETUP.md) | [Telegram Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
 This repository documents and packages the **patching method**, **Telegram runtime source**, and **setup scripts**. It does **not** ship OpenAI's application binaries.
 
 Keywords: `codex`, `telegram`, `windows`, `portable`, `desktop`, `electron`.
+
+Feature overview: [docs/FEATURES.md](docs/FEATURES.md)
 
 ## What this does
 
