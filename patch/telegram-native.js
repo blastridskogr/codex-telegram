@@ -11,7 +11,7 @@ const DEFAULT_PIPE = "\\\\.\\pipe\\codex-ipc";
 const DEFAULT_POLL_TIMEOUT_SEC = 30;
 const DEFAULT_MAX_REPLY_CHARS = 3500;
 const DEFAULT_RECENT_SESSION_LIMIT = 10;
-const DEFAULT_SESSION_HISTORY_REPLAY_HOURS = 2;
+const DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT = 5;
 const DEFAULT_SESSION_REPLAY_SEND_DELAY_MS = 250;
 const DEFAULT_CHAT_SETTINGS_FILE = "chat_settings.json";
 const DEFAULT_PENDING_NEW_THREAD_FILE = "pending_new_thread.json";
@@ -638,37 +638,6 @@ function formatSessionTimestamp(date) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function findReplayAnchorTimestamp(history, replayedAt = new Date()) {
-    const timestamps = (history || []).map((entry) => {
-        const timestamp = entry?.timestamp;
-        if (!timestamp || typeof timestamp.getTime !== "function") {
-            return null;
-        }
-        const value = timestamp.getTime();
-        return Number.isNaN(value) ? null : value;
-    }).filter((value) => typeof value === "number");
-    if (timestamps.length === 0) {
-        return replayedAt.getTime();
-    }
-    return Math.max(...timestamps);
-}
-
-function filterHistoryForReplayWindow(history, replayedAt, windowHours = DEFAULT_SESSION_HISTORY_REPLAY_HOURS) {
-    const anchorMs = findReplayAnchorTimestamp(history, replayedAt);
-    const cutoffMs = anchorMs - (windowHours * 60 * 60 * 1000);
-    return (history || []).filter((entry) => {
-        const timestamp = entry?.timestamp;
-        if (!timestamp || typeof timestamp.getTime !== "function") {
-            return false;
-        }
-        const value = timestamp.getTime();
-        if (Number.isNaN(value)) {
-            return false;
-        }
-        return value >= cutoffMs && value <= anchorMs;
-    });
-}
-
 function shouldTreatAsReplayResult(entry, preferTaskComplete = false) {
     if (entry?.role !== "assistant") {
         return false;
@@ -679,12 +648,11 @@ function shouldTreatAsReplayResult(entry, preferTaskComplete = false) {
     return !!entry?.isFinalSummary || entry?.phase === "final_answer";
 }
 
-function buildSessionReplaySelection(history, replayedAt = new Date()) {
-    const sourceHistory = filterHistoryForReplayWindow(history, replayedAt);
+function buildSessionReplaySelection(history) {
     const groups = [];
     const pendingUserEntries = [];
-    const preferTaskComplete = sourceHistory.some((entry) => entry?.isFinalSummary);
-    for (const entry of sourceHistory) {
+    const preferTaskComplete = (history || []).some((entry) => entry?.isFinalSummary);
+    for (const entry of history || []) {
         if (entry?.role === "user") {
             pendingUserEntries.push(entry);
             continue;
@@ -700,13 +668,12 @@ function buildSessionReplaySelection(history, replayedAt = new Date()) {
             resultEntry: entry,
         });
     }
-    if (pendingUserEntries.length) {
-        groups.push({
-            userEntries: pendingUserEntries.splice(0, pendingUserEntries.length),
-            resultEntry: null,
-        });
-    }
-    return { groups };
+    return {
+        groups: groups
+            .filter((group) => Array.isArray(group?.userEntries) && group.userEntries.length && group?.resultEntry)
+            .slice(-DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT)
+            .reverse(),
+    };
 }
 
 function extractPreviewFromSessionTail(tail) {
@@ -2170,24 +2137,17 @@ class CodexAppDirectCompanion {
 
     buildSessionReplayHeader(sessionInfo, history, { replayedAt = new Date() } = {}) {
         const replay = buildSessionReplaySelection(history, replayedAt);
-        const replayAnchorMs = findReplayAnchorTimestamp(history, replayedAt);
-        const replayAnchor = Number.isFinite(replayAnchorMs) ? formatSessionTimestamp(new Date(replayAnchorMs)) : "-";
         const userEntryCount = (replay.groups || []).reduce((sum, group) => sum + ((group?.userEntries || []).length), 0);
         const completedGroupCount = (replay.groups || []).filter((group) => group?.resultEntry).length;
-        const hasPendingOnlyGroup = (replay.groups || []).some((group) => Array.isArray(group?.userEntries) && group.userEntries.length > 0 && !group.resultEntry);
         const lines = [
             `# ${sessionInfo?.title || "(untitled session)"}`,
             `Session ID: ${sessionInfo?.sessionId || "-"}`,
             `Last activity: ${sessionInfo?.modifiedAt ? formatSessionTimestamp(sessionInfo.modifiedAt) : "-"}`,
             `Messages: ${history.length}`,
-            `Replay anchor: ${replayAnchor}`,
-            `Replay window: ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message`,
-            "Replay mode: completed instruction/result pairs from the replay window",
+            `Replay count: latest ${DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT} completed instruction/result pairs`,
+            "Replay order: newest completed pair first",
         ];
         lines.push(`Replaying ${userEntryCount} user messages across ${completedGroupCount} completed instruction/result groups.`);
-        if (hasPendingOnlyGroup) {
-            lines.push("Including the latest pending user-only group with no completed result yet.");
-        }
         return {
             header: lines.join("\n"),
             groups: replay.groups,
