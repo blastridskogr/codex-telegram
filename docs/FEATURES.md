@@ -37,7 +37,7 @@ See [TELEGRAM_COMMANDS.md](TELEGRAM_COMMANDS.md) for the full command list.
 ## Session behavior
 
 - **Session replay on switch**
-  - When you switch sessions, Telegram shows only the last **2 hours** of that session's history.
+  - When you switch sessions, Telegram shows only the **user inputs** plus the **latest Codex summary** from the last **2 hours** of that session's history.
   - The replay window is anchored to the **latest message in the selected session**, not the time when you switched.
 
 - **Assistant formatting**

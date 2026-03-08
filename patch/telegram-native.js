@@ -654,6 +654,18 @@ function filterHistoryForReplayWindow(history, replayedAt, windowHours = DEFAULT
     });
 }
 
+function buildSessionReplaySelection(history, replayedAt = new Date()) {
+    const sourceHistory = filterHistoryForReplayWindow(history, replayedAt);
+    const userEntries = sourceHistory.filter((entry) => entry?.role === "user");
+    let latestAssistantEntry = null;
+    for (const entry of sourceHistory) {
+        if (entry?.role === "assistant") {
+            latestAssistantEntry = entry;
+        }
+    }
+    return { userEntries, latestAssistantEntry };
+}
+
 function extractPreviewFromSessionTail(tail) {
     const lines = tail.split(/\r?\n/).filter(Boolean).reverse();
     for (const line of lines) {
@@ -2114,7 +2126,7 @@ class CodexAppDirectCompanion {
     }
 
     buildSessionReplayHeader(sessionInfo, history, { replayedAt = new Date() } = {}) {
-        const sourceHistory = filterHistoryForReplayWindow(history, replayedAt);
+        const replay = buildSessionReplaySelection(history, replayedAt);
         const replayAnchorMs = findReplayAnchorTimestamp(history, replayedAt);
         const replayAnchor = Number.isFinite(replayAnchorMs) ? formatSessionTimestamp(new Date(replayAnchorMs)) : "-";
         const lines = [
@@ -2124,16 +2136,14 @@ class CodexAppDirectCompanion {
             `Messages: ${history.length}`,
             `Replay anchor: ${replayAnchor}`,
             `Replay window: ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message`,
+            "Replay mode: all user inputs in the replay window + latest Codex summary in that window",
         ];
-        if (sourceHistory.length !== history.length) {
-            lines.push(`Replaying ${sourceHistory.length} of ${history.length} messages from the last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message.`);
-        }
-        if (sourceHistory.length === 0) {
-            lines.push(`No session messages were found in the ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message.`);
-        }
+        lines.push(`Replaying ${replay.userEntries.length} user messages from the replay window.`);
+        lines.push(replay.latestAssistantEntry ? "Including the latest Codex summary from the replay window." : "No Codex summary was found in the replay window.");
         return {
             header: lines.join("\n"),
-            sourceHistory,
+            userEntries: replay.userEntries,
+            latestAssistantEntry: replay.latestAssistantEntry,
         };
     }
 
@@ -2176,9 +2186,13 @@ class CodexAppDirectCompanion {
         }
         const replay = this.buildSessionReplayHeader(session, history, { replayedAt: new Date() });
         await this.sendPlainChunkedText(chatId, replay.header);
-        for (const entry of replay.sourceHistory) {
+        for (const entry of replay.userEntries) {
             await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
             await this.sendReplayHistoryEntry(chatId, entry);
+        }
+        if (replay.latestAssistantEntry) {
+            await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
+            await this.sendReplayHistoryEntry(chatId, replay.latestAssistantEntry);
         }
     }
 
