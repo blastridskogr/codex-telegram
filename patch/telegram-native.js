@@ -669,30 +669,44 @@ function filterHistoryForReplayWindow(history, replayedAt, windowHours = DEFAULT
     });
 }
 
+function shouldTreatAsReplayResult(entry, preferTaskComplete = false) {
+    if (entry?.role !== "assistant") {
+        return false;
+    }
+    if (preferTaskComplete) {
+        return !!entry?.isFinalSummary;
+    }
+    return !!entry?.isFinalSummary || entry?.phase === "final_answer";
+}
+
 function buildSessionReplaySelection(history, replayedAt = new Date()) {
     const sourceHistory = filterHistoryForReplayWindow(history, replayedAt);
-    const userEntries = sourceHistory.filter((entry) => entry?.role === "user");
-    let latestAssistantEntry = null;
-    for (const entry of Array.isArray(history) ? history : []) {
-        if (entry?.role === "assistant" && entry?.isFinalSummary) {
-            latestAssistantEntry = entry;
+    const groups = [];
+    const pendingUserEntries = [];
+    const preferTaskComplete = sourceHistory.some((entry) => entry?.isFinalSummary);
+    for (const entry of sourceHistory) {
+        if (entry?.role === "user") {
+            pendingUserEntries.push(entry);
+            continue;
         }
-    }
-    if (!latestAssistantEntry) {
-        for (const entry of Array.isArray(history) ? history : []) {
-            if (entry?.role === "assistant" && entry?.phase !== "commentary") {
-                latestAssistantEntry = entry;
-            }
+        if (!shouldTreatAsReplayResult(entry, preferTaskComplete)) {
+            continue;
         }
-    }
-    if (!latestAssistantEntry) {
-        for (const entry of Array.isArray(history) ? history : []) {
-            if (entry?.role === "assistant") {
-                latestAssistantEntry = entry;
-            }
+        if (!pendingUserEntries.length) {
+            continue;
         }
+        groups.push({
+            userEntries: pendingUserEntries.splice(0, pendingUserEntries.length),
+            resultEntry: entry,
+        });
     }
-    return { userEntries, latestAssistantEntry };
+    if (pendingUserEntries.length) {
+        groups.push({
+            userEntries: pendingUserEntries.splice(0, pendingUserEntries.length),
+            resultEntry: null,
+        });
+    }
+    return { groups };
 }
 
 function extractPreviewFromSessionTail(tail) {
@@ -2158,6 +2172,9 @@ class CodexAppDirectCompanion {
         const replay = buildSessionReplaySelection(history, replayedAt);
         const replayAnchorMs = findReplayAnchorTimestamp(history, replayedAt);
         const replayAnchor = Number.isFinite(replayAnchorMs) ? formatSessionTimestamp(new Date(replayAnchorMs)) : "-";
+        const userEntryCount = (replay.groups || []).reduce((sum, group) => sum + ((group?.userEntries || []).length), 0);
+        const completedGroupCount = (replay.groups || []).filter((group) => group?.resultEntry).length;
+        const hasPendingOnlyGroup = (replay.groups || []).some((group) => Array.isArray(group?.userEntries) && group.userEntries.length > 0 && !group.resultEntry);
         const lines = [
             `# ${sessionInfo?.title || "(untitled session)"}`,
             `Session ID: ${sessionInfo?.sessionId || "-"}`,
@@ -2165,14 +2182,15 @@ class CodexAppDirectCompanion {
             `Messages: ${history.length}`,
             `Replay anchor: ${replayAnchor}`,
             `Replay window: ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message`,
-            "Replay mode: all user inputs in the replay window + latest Codex summary in the session",
+            "Replay mode: completed instruction/result pairs from the replay window",
         ];
-        lines.push(`Replaying ${replay.userEntries.length} user messages from the replay window.`);
-        lines.push(replay.latestAssistantEntry ? "Including the latest Codex summary from the session." : "No Codex summary was found in the session yet.");
+        lines.push(`Replaying ${userEntryCount} user messages across ${completedGroupCount} completed instruction/result groups.`);
+        if (hasPendingOnlyGroup) {
+            lines.push("Including the latest pending user-only group with no completed result yet.");
+        }
         return {
             header: lines.join("\n"),
-            userEntries: replay.userEntries,
-            latestAssistantEntry: replay.latestAssistantEntry,
+            groups: replay.groups,
         };
     }
 
@@ -2187,6 +2205,13 @@ class CodexAppDirectCompanion {
     }
 
     async sendReplayHistoryEntry(chatId, entry) {
+        if (entry.role === "user-group") {
+            const groupedText = (entry.userEntries || []).map((item) => this.formatTranscriptLine(item)).filter(Boolean).join("\n\n").trim();
+            if (groupedText) {
+                await this.sendPlainChunkedText(chatId, groupedText);
+            }
+            return;
+        }
         if (entry.role !== "assistant") {
             await this.sendPlainChunkedText(chatId, this.formatTranscriptLine(entry));
             return;
@@ -2214,13 +2239,15 @@ class CodexAppDirectCompanion {
             return;
         }
         const replay = this.buildSessionReplayHeader(session, history, { replayedAt: new Date() });
-        for (const entry of replay.userEntries) {
-            await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
-            await this.sendReplayHistoryEntry(chatId, entry);
-        }
-        if (replay.latestAssistantEntry) {
-            await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
-            await this.sendReplayHistoryEntry(chatId, replay.latestAssistantEntry);
+        for (const group of replay.groups || []) {
+            if (Array.isArray(group?.userEntries) && group.userEntries.length) {
+                await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
+                await this.sendReplayHistoryEntry(chatId, { role: "user-group", userEntries: group.userEntries });
+            }
+            if (group?.resultEntry) {
+                await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
+                await this.sendReplayHistoryEntry(chatId, group.resultEntry);
+            }
         }
     }
 

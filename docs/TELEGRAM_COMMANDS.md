@@ -28,7 +28,7 @@ Behavior:
 - `/new` does **not** synthesize a fake session. It opens the real Codex new-thread flow.
 - the first Telegram message after `/new` creates the real thread through Codex and auto-binds the returned `conversationId`
 - the picker shows `session title + session id + last activity`
-- when you switch sessions, only the user inputs from the last 2 hours of session history before the latest message in that session plus the latest final Codex summary from the session are mirrored back into Telegram as display-only chat output
+- when you switch sessions, only completed instruction/result pairs from the last 2 hours of session history before the latest message in that session are mirrored back into Telegram as display-only chat output
 - the history replay does **not** cost extra model tokens
 
 ## Model controls
