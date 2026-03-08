@@ -2161,7 +2161,7 @@ class CodexAppDirectCompanion {
             const text = index === 0
                 ? `<b>${escapeTelegramHtml(prefix)}</b>\n${message.text}`
                 : message.text;
-            await this.sendText(chatId, text, message.parseMode ? { parseMode: message.parseMode } : null);
+            await this.api.sendMessage(chatId, text, message.parseMode ? { parseMode: message.parseMode } : null);
             if (index < messages.length - 1) {
                 await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
             }
