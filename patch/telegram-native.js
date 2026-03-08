@@ -11,7 +11,8 @@ const DEFAULT_PIPE = "\\\\.\\pipe\\codex-ipc";
 const DEFAULT_POLL_TIMEOUT_SEC = 30;
 const DEFAULT_MAX_REPLY_CHARS = 3500;
 const DEFAULT_RECENT_SESSION_LIMIT = 10;
-const DEFAULT_SESSION_HISTORY_REPLAY_HOURS = 24;
+const DEFAULT_SESSION_HISTORY_REPLAY_HOURS = 6;
+const DEFAULT_SESSION_REPLAY_SEND_DELAY_MS = 250;
 const DEFAULT_CHAT_SETTINGS_FILE = "chat_settings.json";
 const DEFAULT_PENDING_NEW_THREAD_FILE = "pending_new_thread.json";
 const DEFAULT_IPC_CONNECT_TIMEOUT_MS = 30000;
@@ -622,8 +623,24 @@ function formatSessionTimestamp(date) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function findReplayAnchorTimestamp(history, replayedAt = new Date()) {
+    const timestamps = (history || []).map((entry) => {
+        const timestamp = entry?.timestamp;
+        if (!timestamp || typeof timestamp.getTime !== "function") {
+            return null;
+        }
+        const value = timestamp.getTime();
+        return Number.isNaN(value) ? null : value;
+    }).filter((value) => typeof value === "number");
+    if (timestamps.length === 0) {
+        return replayedAt.getTime();
+    }
+    return Math.max(...timestamps);
+}
+
 function filterHistoryForReplayWindow(history, replayedAt, windowHours = DEFAULT_SESSION_HISTORY_REPLAY_HOURS) {
-    const cutoffMs = replayedAt.getTime() - (windowHours * 60 * 60 * 1000);
+    const anchorMs = findReplayAnchorTimestamp(history, replayedAt);
+    const cutoffMs = anchorMs - (windowHours * 60 * 60 * 1000);
     return (history || []).filter((entry) => {
         const timestamp = entry?.timestamp;
         if (!timestamp || typeof timestamp.getTime !== "function") {
@@ -633,7 +650,7 @@ function filterHistoryForReplayWindow(history, replayedAt, windowHours = DEFAULT
         if (Number.isNaN(value)) {
             return false;
         }
-        return value >= cutoffMs;
+        return value >= cutoffMs && value <= anchorMs;
     });
 }
 
@@ -2096,26 +2113,59 @@ class CodexAppDirectCompanion {
         return `${prefix}\n${entry.text}`.trim();
     }
 
-    buildSessionTranscript(sessionInfo, history, { replayedAt = new Date() } = {}) {
+    buildSessionReplayHeader(sessionInfo, history, { replayedAt = new Date() } = {}) {
         const sourceHistory = filterHistoryForReplayWindow(history, replayedAt);
+        const replayAnchorMs = findReplayAnchorTimestamp(history, replayedAt);
+        const replayAnchor = Number.isFinite(replayAnchorMs) ? formatSessionTimestamp(new Date(replayAnchorMs)) : "-";
         const lines = [
             `# ${sessionInfo?.title || "(untitled session)"}`,
             `Session ID: ${sessionInfo?.sessionId || "-"}`,
             `Last activity: ${sessionInfo?.modifiedAt ? formatSessionTimestamp(sessionInfo.modifiedAt) : "-"}`,
             `Messages: ${history.length}`,
-            `Replay window: last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours`,
+            `Replay anchor: ${replayAnchor}`,
+            `Replay window: ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message`,
         ];
         if (sourceHistory.length !== history.length) {
-            lines.push(`Replaying ${sourceHistory.length} of ${history.length} messages from the last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours.`);
+            lines.push(`Replaying ${sourceHistory.length} of ${history.length} messages from the last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message.`);
         }
         if (sourceHistory.length === 0) {
-            lines.push(`No session messages were found in the last ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours.`);
+            lines.push(`No session messages were found in the ${DEFAULT_SESSION_HISTORY_REPLAY_HOURS} hours before the latest session message.`);
         }
-        for (const entry of sourceHistory) {
-            lines.push("");
-            lines.push(this.formatTranscriptLine(entry));
+        return {
+            header: lines.join("\n"),
+            sourceHistory,
+        };
+    }
+
+    async sendPlainChunkedText(chatId, text) {
+        const chunks = splitReplyChunks(text, this.config.maxReplyChars);
+        for (let index = 0; index < chunks.length; index += 1) {
+            await this.api.sendMessage(chatId, chunks[index]);
+            if (index < chunks.length - 1) {
+                await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
+            }
         }
-        return lines.join("\n");
+    }
+
+    async sendReplayHistoryEntry(chatId, entry) {
+        if (entry.role !== "assistant") {
+            await this.sendPlainChunkedText(chatId, this.formatTranscriptLine(entry));
+            return;
+        }
+
+        const timestamp = this.formatHistoryTimestamp(entry.timestamp);
+        const prefix = timestamp ? `[${timestamp}] Codex` : "Codex";
+        const messages = buildAssistantTelegramMessages(entry.text, this.config.maxReplyChars);
+        for (let index = 0; index < messages.length; index += 1) {
+            const message = messages[index];
+            const text = index === 0
+                ? `<b>${escapeTelegramHtml(prefix)}</b>\n${message.text}`
+                : message.text;
+            await this.sendText(chatId, text, message.parseMode ? { parseMode: message.parseMode } : null);
+            if (index < messages.length - 1) {
+                await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
+            }
+        }
     }
 
     async sendSessionHistory(chatId, sessionId) {
@@ -2124,13 +2174,11 @@ class CodexAppDirectCompanion {
             await this.api.sendMessage(chatId, `Unable to load session history for ${sessionId}.`);
             return;
         }
-        const fullTranscript = this.buildSessionTranscript(session, history, { replayedAt: new Date() });
-        const chunks = splitReplyChunks(fullTranscript, this.config.maxReplyChars);
-        for (let index = 0; index < chunks.length; index += 1) {
-            await this.api.sendMessage(chatId, chunks[index]);
-            if (index < chunks.length - 1) {
-                await delay(150);
-            }
+        const replay = this.buildSessionReplayHeader(session, history, { replayedAt: new Date() });
+        await this.sendPlainChunkedText(chatId, replay.header);
+        for (const entry of replay.sourceHistory) {
+            await delay(DEFAULT_SESSION_REPLAY_SEND_DELAY_MS);
+            await this.sendReplayHistoryEntry(chatId, entry);
         }
     }
 
