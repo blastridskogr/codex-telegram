@@ -14,7 +14,7 @@ Keywords: `codex`, `telegram`, `windows`, `portable`, `desktop`, `electron`.
 - injects Telegram control **inside the app process**
 - binds a Telegram chat to a Codex session
 - opens a real Codex **New Thread** and binds the new session from Telegram
-- lets Telegram switch session, model, speed, reasoning, and sandbox
+- lets Telegram switch session, model, speed, reasoning, and permission
 - mirrors full session history into Telegram when you switch sessions
 
 ## What this repo intentionally does not include
@@ -111,6 +111,7 @@ Examples:
 - `/model` or `/codex_model`
 - `/speed` or `/codex_speed`
 - `/reasoning` or `/codex_reasoning`
+- `/permission` or `/codex_permission`
 - `/sandbox` or `/codex_sandbox`
 - `/current` or `/codex_current`
 

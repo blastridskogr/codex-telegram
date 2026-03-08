@@ -18,6 +18,7 @@ const DEFAULT_IPC_RETRY_DELAY_MS = 500;
 const DEFAULT_TURN_INJECT_RETRY_COUNT = 3;
 const DEFAULT_TURN_INJECT_RETRY_DELAY_MS = 900;
 const DEFAULT_LABEL = "Default";
+const DEFAULT_PERMISSION_LABEL = "Basic permission";
 const CODEX_COMMANDS = [
     { command: "codex_help", description: "Show Codex Telegram commands." },
     { command: "codex_controls", description: "Open the Codex control panel." },
@@ -27,12 +28,13 @@ const CODEX_COMMANDS = [
     { command: "codex_model", description: "Pick the Codex model." },
     { command: "codex_speed", description: "Pick the Codex speed." },
     { command: "codex_reasoning", description: "Pick the Codex reasoning effort." },
+    { command: "codex_permission", description: "Pick the Codex permission mode." },
     { command: "codex_sandbox", description: "Pick the Codex sandbox mode." },
     { command: "codex_unbind", description: "Unbind this chat from the current Codex session." },
     { command: "codex_status", description: "Show Codex Telegram runtime status." },
 ];
 const SANDBOX_OPTIONS = [
-    { id: "default", label: DEFAULT_LABEL, value: null },
+    { id: "default", label: DEFAULT_PERMISSION_LABEL, value: null },
     { id: "danger-full-access", label: "Full access", value: "danger-full-access" },
     { id: "workspace-write", label: "Workspace write", value: "workspace-write" },
     { id: "read-only", label: "Read only", value: "read-only" },
@@ -63,6 +65,7 @@ const HELP_MESSAGE = [
     "/speed - pick speed",
     "/model - pick model",
     "/reasoning - pick reasoning",
+    "/permission - pick permission",
     "/sandbox - pick sandbox",
     "",
     "After binding, send text, images, or documents and they will be injected into the bound Codex app session.",
@@ -1776,6 +1779,7 @@ class CodexAppDirectCompanion {
             { command: "model", description: "Pick the Codex model." },
             { command: "speed", description: "Pick the Codex speed." },
             { command: "reasoning", description: "Pick the Codex reasoning effort." },
+            { command: "permission", description: "Pick the Codex permission mode." },
             { command: "sandbox", description: "Pick the Codex sandbox mode." },
             { command: "unbind", description: "Unbind this chat from the current session." },
             ...CODEX_COMMANDS,
@@ -1816,7 +1820,7 @@ class CodexAppDirectCompanion {
             `Model: ${modelSummary}`,
             `Speed: ${speedSummary}`,
             `Reasoning: ${effortSummary}`,
-            `Sandbox: ${labelForOption(SANDBOX_OPTIONS, settings.sandbox)}`,
+            `Permission: ${labelForOption(SANDBOX_OPTIONS, settings.sandbox)}`,
         ].join("\n");
     }
 
@@ -1849,7 +1853,7 @@ class CodexAppDirectCompanion {
                     [{ text: "Model", callback_data: "menu:model" }],
                     [{ text: "Speed", callback_data: "menu:speed" }],
                     [{ text: "Reasoning", callback_data: "menu:effort" }],
-                    [{ text: "Sandbox", callback_data: "menu:sandbox" }],
+                    [{ text: "Permission", callback_data: "menu:permission" }],
                 ],
             },
         };
@@ -2008,6 +2012,12 @@ class CodexAppDirectCompanion {
                     : labelForOption(effortOptions, settings.effort),
                 options: effortOptions,
             },
+            permission: {
+                title: "Permission selection",
+                current: labelForOption(SANDBOX_OPTIONS, settings.sandbox),
+                options: SANDBOX_OPTIONS,
+                patchKey: "sandbox",
+            },
             sandbox: {
                 title: "Sandbox selection",
                 current: labelForOption(SANDBOX_OPTIONS, settings.sandbox),
@@ -2024,7 +2034,7 @@ class CodexAppDirectCompanion {
                 inline_keyboard: [
                     ...config.options.map((option) => [{
                         text: option.label,
-                        callback_data: `set:${kind}:${option.id}`,
+                        callback_data: `set:${config.patchKey || kind}:${option.id}`,
                     }]),
                     [{ text: "Back", callback_data: "menu:main" }],
                 ],
@@ -2266,7 +2276,7 @@ class CodexAppDirectCompanion {
             return true;
         }
         if (text === "/help") {
-            await this.api.sendMessage(chatId, `${HELP_MESSAGE}\n/controls - open controls\n/model - pick model\n/reasoning - pick reasoning\n/sandbox - pick sandbox\n/codex_help - show codex-prefixed commands`);
+            await this.api.sendMessage(chatId, `${HELP_MESSAGE}\n/controls - open controls\n/model - pick model\n/reasoning - pick reasoning\n/permission - pick permission\n/sandbox - pick sandbox\n/codex_help - show codex-prefixed commands`);
             return true;
         }
         if (text === "/codex_help") {
@@ -2279,6 +2289,7 @@ class CodexAppDirectCompanion {
                 "/codex_model",
                 "/codex_speed",
                 "/codex_reasoning",
+                "/codex_permission",
                 "/codex_sandbox",
                 "/codex_status",
                 "/codex_unbind",
@@ -2321,6 +2332,10 @@ class CodexAppDirectCompanion {
         }
         if (text === "/reasoning" || text === "/codex_reasoning") {
             await this.showOptionPicker(chatId, "effort");
+            return true;
+        }
+        if (text === "/permission" || text === "/codex_permission") {
+            await this.showOptionPicker(chatId, "permission");
             return true;
         }
         if (text === "/sandbox" || text === "/codex_sandbox") {

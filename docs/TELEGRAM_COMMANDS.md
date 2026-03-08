@@ -9,7 +9,7 @@ The runtime supports both the short alias form and the `codex_*` prefixed form.
 | `/help` | `/codex_help` | show the Telegram control commands |
 | `/status` | `/codex_status` | show runtime health, pipe, bindings path, inbox path, workspace roots |
 | `/controls` | `/codex_controls` | open the main control keyboard |
-| `/current` | `/codex_current` | show current session, model, speed, reasoning, sandbox |
+| `/current` | `/codex_current` | show current session, model, speed, reasoning, permission |
 | `/new [prompt]` | `/codex_new [prompt]` | open a real native Codex new-thread flow |
 | `/session` | `/codex_session` | open the recent-session picker |
 | `/unbind` | `/codex_unbind` | remove the current chat binding |
@@ -68,14 +68,23 @@ Reasoning levels are model-dependent. Supported labels may include:
 - `High`
 - `Extra High`
 
-## Sandbox controls
+## Permission controls
+
+- `/permission`
+- `/codex_permission`
+
+These match the app-facing permission surface.
+
+## Sandbox compatibility controls
 
 - `/sandbox`
 - `/codex_sandbox`
 
+These remain available as compatibility aliases and open the same underlying picker.
+
 Supported values:
 
-- `Default`
+- `Basic permission`
 - `Full access`
 - `Workspace write`
 - `Read only`
