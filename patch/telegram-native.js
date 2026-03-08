@@ -671,8 +671,7 @@ function buildSessionReplaySelection(history) {
     return {
         groups: groups
             .filter((group) => Array.isArray(group?.userEntries) && group.userEntries.length && group?.resultEntry)
-            .slice(-DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT)
-            .reverse(),
+            .slice(-DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT),
     };
 }
 
@@ -2145,7 +2144,7 @@ class CodexAppDirectCompanion {
             `Last activity: ${sessionInfo?.modifiedAt ? formatSessionTimestamp(sessionInfo.modifiedAt) : "-"}`,
             `Messages: ${history.length}`,
             `Replay count: latest ${DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT} completed instruction/result pairs`,
-            "Replay order: newest completed pair first",
+            "Replay order: chronological (oldest to newest within the selected latest pairs)",
         ];
         lines.push(`Replaying ${userEntryCount} user messages across ${completedGroupCount} completed instruction/result groups.`);
         return {

@@ -38,7 +38,7 @@ See [TELEGRAM_COMMANDS.md](TELEGRAM_COMMANDS.md) for the full command list.
 
 - **Session replay on switch**
 - When you switch sessions, Telegram shows the **latest 5 completed instruction/result pairs** from that session.
-- Replay order is **reverse chronological**: newest completed pair first.
+- Replay order is **chronological within that latest set**: oldest pair first, newest pair last.
 
 - **Assistant formatting**
   - Replayed and live **assistant** responses preserve common Markdown-style formatting in Telegram.
