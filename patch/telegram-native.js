@@ -2478,6 +2478,16 @@ class CodexAppDirectCompanion {
             }
         }
     }
+
+    async dispose() {
+        if (this.disposed) {
+            return;
+        }
+        this.disposed = true;
+        await this.monitor.dispose().catch((error) => {
+            this.logger.warn(`monitor dispose failed: ${error.message}`);
+        });
+    }
 }
 
 async function bootWithConfigPath(configPath, options = {}) {
@@ -2551,8 +2561,13 @@ async function stopNativeTelegramBridge() {
 
     if (runningApp) {
         try {
-            runningApp.disposed = true;
-            await runningApp.dispose();
+            if (typeof runningApp.dispose === "function") {
+                await runningApp.dispose();
+            } else if (typeof runningApp.close === "function") {
+                await runningApp.close();
+            } else {
+                runningApp.disposed = true;
+            }
         } catch (error) {
             appendBootstrapLog(`[stop-error] ${formatError(error)}`);
         }
