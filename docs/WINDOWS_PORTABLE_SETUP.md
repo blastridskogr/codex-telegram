@@ -25,7 +25,7 @@ npm run build:portable
 This one command runs the full local patch pipeline:
 
 - install npm dependencies
-- prepare `work\portable_package_root_v2`
+- prepare `work\portable_package_root`
 - extract `app.asar` into `work\full_extract`
 - inject the Telegram runtime
 - rebuild `work\app.patched.asar`
@@ -54,7 +54,7 @@ npm install
 
 ## 2. Prepare the portable package root
 
-This copies your installed Codex package into `work/portable_package_root_v2` and patches the manifest so it can register side-by-side as `OpenAI.CodexPortable`.
+This copies your installed Codex package into `work/portable_package_root` and patches the manifest so it can register side-by-side as `OpenAI.CodexPortable`.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\prepare_portable_package.ps1
@@ -63,7 +63,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\prepare_portable_package.ps1
 ## 3. Extract the copied `app.asar`
 
 ```powershell
-npx asar extract .\work\portable_package_root_v2\app\resources\app.asar .\work\full_extract
+npx asar extract .\work\portable_package_root\app\resources\app.asar .\work\full_extract
 ```
 
 ## 4. Inject the Telegram runtime into the extracted app
@@ -88,7 +88,7 @@ node .\scripts\rebuild_patched_asar.mjs
 ## 6. Copy the rebuilt `app.asar` back into the package root
 
 ```powershell
-Copy-Item .\work\app.patched.asar .\work\portable_package_root_v2\app\resources\app.asar -Force
+Copy-Item .\work\app.patched.asar .\work\portable_package_root\app\resources\app.asar -Force
 ```
 
 ## 7. Rewrite the EXE integrity metadata

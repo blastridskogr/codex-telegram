@@ -6,8 +6,8 @@ import { getRawHeader } from "@electron/asar";
 import { NtExecutable, NtExecutableResource, Resource } from "resedit";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const exePath = path.join(repoRoot, "work", "portable_package_root_v2", "app", "Codex.exe");
-const asarPath = path.join(repoRoot, "work", "portable_package_root_v2", "app", "resources", "app.asar");
+const exePath = path.join(repoRoot, "work", "portable_package_root", "app", "Codex.exe");
+const asarPath = path.join(repoRoot, "work", "portable_package_root", "app", "resources", "app.asar");
 const relativeAsarPath = "resources\\app.asar";
 
 if (!fs.existsSync(exePath)) {
@@ -63,4 +63,3 @@ res.outputResource(exe);
 fs.writeFileSync(exePath, Buffer.from(exe.generate()));
 
 console.log(JSON.stringify({ exePath, asarPath, relativeAsarPath, hash }, null, 2));
-

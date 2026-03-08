@@ -5,7 +5,7 @@ param(
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $PackageRoot) {
-  $PackageRoot = Join-Path $repoRoot 'work\\portable_package_root_v2'
+  $PackageRoot = Join-Path $repoRoot 'work\\portable_package_root'
 }
 
 $manifestPath = Join-Path $PackageRoot 'AppxManifest.xml'
@@ -48,4 +48,3 @@ if ($null -eq $pkg) {
 }
 
 Write-Output "REGISTERED $($pkg.PackageFullName)"
-

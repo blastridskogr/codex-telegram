@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $workRoot = Join-Path $repoRoot 'work'
-$packageRoot = Join-Path $workRoot 'portable_package_root_v2'
+$packageRoot = Join-Path $workRoot 'portable_package_root'
 $asarPath = Join-Path $packageRoot 'app\resources\app.asar'
 $extractRoot = Join-Path $workRoot 'full_extract'
 $patchedAsarPath = Join-Path $workRoot 'app.patched.asar'

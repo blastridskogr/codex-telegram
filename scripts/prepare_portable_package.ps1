@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $OutputRoot) {
-  $OutputRoot = Join-Path $repoRoot 'work\\portable_package_root_v2'
+$OutputRoot = Join-Path $repoRoot 'work\\portable_package_root'
 }
 
 $pkg = Get-AppxPackage -Name 'OpenAI.Codex' | Sort-Object Version -Descending | Select-Object -First 1

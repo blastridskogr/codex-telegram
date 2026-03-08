@@ -4,7 +4,7 @@ param(
 )
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$packageRoot = Join-Path $repoRoot 'work\\portable_package_root_v2'
+$packageRoot = Join-Path $repoRoot 'work\\portable_package_root'
 $exe = Join-Path $packageRoot 'app\\Codex.exe'
 $defaultUserDataDir = Join-Path $env:LOCALAPPDATA 'CodexPortableData'
 $userDataDir = if ($InstanceName -eq 'default') {

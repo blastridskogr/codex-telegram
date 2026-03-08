@@ -22,7 +22,7 @@ Feature overview: [docs/FEATURES.md](docs/FEATURES.md)
 ## What this repo intentionally does not include
 
 - original Codex binaries
-- copied `portable_package_root_v2` app files
+- copied `portable_package_root` app files
 - `app.asar` or any other proprietary OpenAI bundle
 - your Telegram token, chat id, logs, or local state
 
@@ -76,7 +76,7 @@ npm run build:portable
 This one command does the full local patch pipeline:
 
 - installs npm dependencies
-- prepares `work\\portable_package_root_v2`
+- prepares `work\\portable_package_root`
 - extracts `app.asar`
 - injects the Telegram runtime
 - rebuilds `work\\app.patched.asar`

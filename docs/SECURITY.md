@@ -7,7 +7,7 @@
 - `chat_settings.json`
 - `telegram-inbox/`
 - `logs/`
-- `work/portable_package_root_v2/`
+- `work/portable_package_root/`
 - `work/full_extract/`
 - `work/app.patched.asar`
 
