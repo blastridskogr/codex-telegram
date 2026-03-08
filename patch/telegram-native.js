@@ -194,6 +194,184 @@ function splitReplyChunks(text, limit) {
     return chunks;
 }
 
+function escapeTelegramHtml(text) {
+    return String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+function escapeTelegramHtmlAttribute(text) {
+    return escapeTelegramHtml(text).replace(/"/g, "&quot;");
+}
+
+function splitMarkdownBlocks(text) {
+    const blocks = [];
+    const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
+    if (!normalized) {
+        return blocks;
+    }
+
+    const codeFencePattern = /```[\s\S]*?```/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = codeFencePattern.exec(normalized)) !== null) {
+        const before = normalized.slice(lastIndex, match.index);
+        for (const part of before.split(/\n{2,}/)) {
+            const trimmed = part.trim();
+            if (trimmed) {
+                blocks.push(trimmed);
+            }
+        }
+        const fenced = match[0].trim();
+        if (fenced) {
+            blocks.push(fenced);
+        }
+        lastIndex = match.index + match[0].length;
+    }
+
+    const tail = normalized.slice(lastIndex);
+    for (const part of tail.split(/\n{2,}/)) {
+        const trimmed = part.trim();
+        if (trimmed) {
+            blocks.push(trimmed);
+        }
+    }
+    return blocks;
+}
+
+function splitOversizedMarkdownBlock(block, limit) {
+    const trimmed = String(block || "").trim();
+    if (!trimmed) {
+        return [];
+    }
+    if (!trimmed.startsWith("```") || trimmed.length <= limit) {
+        return splitReplyChunks(trimmed, limit);
+    }
+
+    const lines = trimmed.split("\n");
+    const openingFence = lines[0];
+    const closingFence = lines[lines.length - 1] === "```" ? "```" : openingFence.startsWith("```") ? "```" : "";
+    const bodyLines = closingFence ? lines.slice(1, -1) : lines.slice(1);
+    const chunks = [];
+    let current = [];
+
+    const flush = () => {
+        const candidate = [openingFence, ...current, closingFence].filter(Boolean).join("\n");
+        if (candidate.trim()) {
+            chunks.push(candidate);
+        }
+        current = [];
+    };
+
+    for (const line of bodyLines) {
+        const next = [...current, line];
+        const candidate = [openingFence, ...next, closingFence].filter(Boolean).join("\n");
+        if (candidate.length > limit && current.length > 0) {
+            flush();
+        }
+        current.push(line);
+    }
+    if (current.length > 0) {
+        flush();
+    }
+    return chunks.length > 0 ? chunks : splitReplyChunks(trimmed, limit);
+}
+
+function splitMarkdownForTelegram(text, limit) {
+    const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
+    if (!normalized) {
+        return [];
+    }
+    if (normalized.length <= limit) {
+        return [normalized];
+    }
+
+    const blocks = splitMarkdownBlocks(normalized);
+    const chunks = [];
+    let current = "";
+
+    const flush = () => {
+        const trimmed = current.trim();
+        if (trimmed) {
+            chunks.push(trimmed);
+        }
+        current = "";
+    };
+
+    for (const block of blocks) {
+        const candidate = current ? `${current}\n\n${block}` : block;
+        if (candidate.length <= limit) {
+            current = candidate;
+            continue;
+        }
+        if (current) {
+            flush();
+        }
+        if (block.length <= limit) {
+            current = block;
+            continue;
+        }
+        const oversized = splitOversizedMarkdownBlock(block, limit);
+        for (const part of oversized) {
+            if (part.length <= limit) {
+                chunks.push(part);
+            } else {
+                chunks.push(...splitReplyChunks(part, limit));
+            }
+        }
+    }
+    if (current) {
+        flush();
+    }
+    return chunks.length > 0 ? chunks : splitReplyChunks(normalized, limit);
+}
+
+function renderMarkdownChunkToTelegramHtml(markdown) {
+    const placeholders = [];
+    const pushPlaceholder = (html) => {
+        const token = `@@TGHTML${placeholders.length}@@`;
+        placeholders.push(html);
+        return token;
+    };
+
+    let text = String(markdown || "").replace(/\r\n/g, "\n");
+
+    text = text.replace(/```([A-Za-z0-9_+-]*)\n?([\s\S]*?)```/g, (_, language, code) => {
+        const safeCode = escapeTelegramHtml(String(code || "").replace(/^\n/, "").replace(/\n$/, ""));
+        const classAttr = language ? ` class="language-${escapeTelegramHtmlAttribute(language)}"` : "";
+        return pushPlaceholder(`<pre><code${classAttr}>${safeCode}</code></pre>`);
+    });
+
+    text = text.replace(/`([^`\n]+)`/g, (_, code) => {
+        return pushPlaceholder(`<code>${escapeTelegramHtml(code)}</code>`);
+    });
+
+    text = escapeTelegramHtml(text);
+
+    text = text.replace(/^\s{0,3}#{1,6}\s+(.+)$/gm, (_, content) => `<b>${String(content || "").trim()}</b>`);
+    text = text.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
+    text = text.replace(/__([^_\n]+?)__/g, "<b>$1</b>");
+    text = text.replace(/\[([^\]]+?)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+        return `<a href="${escapeTelegramHtmlAttribute(url)}">${label}</a>`;
+    });
+    text = text.replace(/^&gt;\s?(.*)$/gm, (_, quote) => `<blockquote>${quote}</blockquote>`);
+
+    return text.replace(/@@TGHTML(\d+)@@/g, (_, index) => placeholders[Number(index)] || "");
+}
+
+function buildAssistantTelegramMessages(text, limit) {
+    const body = String(text || "").trim();
+    if (!body) {
+        return [{ text: "[Codex Response]", parseMode: null }];
+    }
+    const safeLimit = Math.max(500, Number(limit || DEFAULT_MAX_REPLY_CHARS) - 400);
+    return splitMarkdownForTelegram(body, safeLimit).map((chunk) => ({
+        text: renderMarkdownChunkToTelegramHtml(chunk),
+        parseMode: "HTML",
+    }));
+}
+
 function labelForOption(options, value) {
     const match = (options || []).find((option) => option.value === value);
     return match ? match.label : (value == null ? DEFAULT_LABEL : String(value));
@@ -1118,24 +1296,40 @@ class TelegramApi {
         return this.call("setMyCommands", payload);
     }
 
-    sendMessage(chatId, text) {
-        return this.call("sendMessage", { chat_id: chatId, text });
+    sendMessage(chatId, text, options = null) {
+        const payload = { chat_id: chatId, text };
+        if (options?.parseMode) {
+            payload.parse_mode = options.parseMode;
+        }
+        return this.call("sendMessage", payload);
     }
 
-    sendMessageWithMarkup(chatId, text, replyMarkup) {
-        return this.call("sendMessage", { chat_id: chatId, text, reply_markup: replyMarkup });
+    sendMessageWithMarkup(chatId, text, replyMarkup, options = null) {
+        const payload = { chat_id: chatId, text, reply_markup: replyMarkup };
+        if (options?.parseMode) {
+            payload.parse_mode = options.parseMode;
+        }
+        return this.call("sendMessage", payload);
     }
 
     sendTyping(chatId) {
         return this.call("sendChatAction", { chat_id: chatId, action: "typing" });
     }
 
-    sendPhoto(chatId, photoPath, caption = "") {
-        return this.callMultipart("sendPhoto", { chat_id: chatId, caption }, "photo", photoPath, path.basename(photoPath), guessMimeType(photoPath));
+    sendPhoto(chatId, photoPath, caption = "", options = null) {
+        const fields = { chat_id: chatId, caption };
+        if (options?.parseMode) {
+            fields.parse_mode = options.parseMode;
+        }
+        return this.callMultipart("sendPhoto", fields, "photo", photoPath, path.basename(photoPath), guessMimeType(photoPath));
     }
 
-    sendDocument(chatId, documentPath, caption = "") {
-        return this.callMultipart("sendDocument", { chat_id: chatId, caption }, "document", documentPath, path.basename(documentPath), "application/octet-stream");
+    sendDocument(chatId, documentPath, caption = "", options = null) {
+        const fields = { chat_id: chatId, caption };
+        if (options?.parseMode) {
+            fields.parse_mode = options.parseMode;
+        }
+        return this.callMultipart("sendDocument", fields, "document", documentPath, path.basename(documentPath), "application/octet-stream");
     }
 
     answerCallbackQuery(callbackQueryId, text = "") {
@@ -1468,9 +1662,19 @@ class AppBroadcastMonitor {
         return `[Codex Response]\n${body}`;
     }
 
-    async sendText(chatId, text) {
-        for (const chunk of splitReplyChunks(text, this.config.maxReplyChars)) {
-            await this.api.sendMessage(chatId, chunk);
+    async sendText(chatId, text, options = null) {
+        const chunks = options?.parseMode
+            ? [{ text, parseMode: options.parseMode }]
+            : splitReplyChunks(text, this.config.maxReplyChars).map((chunk) => ({ text: chunk, parseMode: null }));
+        for (const chunk of chunks) {
+            await this.api.sendMessage(chatId, chunk.text, chunk.parseMode ? { parseMode: chunk.parseMode } : null);
+        }
+    }
+
+    async sendAssistantText(chatId, text) {
+        const messages = buildAssistantTelegramMessages(text, this.config.maxReplyChars);
+        for (const message of messages) {
+            await this.sendText(chatId, message.text, message.parseMode ? { parseMode: message.parseMode } : null);
         }
     }
 
@@ -1533,7 +1737,7 @@ class AppBroadcastMonitor {
                 continue;
             }
 
-            await this.sendText(chatId, this.formatMirrorMessage("assistant", message.text));
+            await this.sendAssistantText(chatId, message.text);
         }
     }
 }

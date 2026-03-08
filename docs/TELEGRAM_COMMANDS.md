@@ -91,3 +91,5 @@ Current behavior on the tested build:
 - text messages: injected into the bound Codex session
 - documents: injected as attachments
 - images: currently downgraded to `text + attachment` for safety
+- mirrored assistant responses preserve common Markdown features such as headings, bold text, inline code, fenced code blocks, links, and blockquotes in Telegram
+- mirrored user/app echo stays plain text on purpose so only Codex output is reformatted

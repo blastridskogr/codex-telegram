@@ -121,6 +121,7 @@ Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 - `/new` opens a real native Codex new-thread flow. The first Telegram message after that creates the real thread and auto-binds the returned session id.
 - the native new-thread path on the tested Codex build exposes `model` and `reasoning` through `startConversation(...)`; `speed/serviceTier` continues to apply on bound-session turns, but not as a separate documented field on that very first new-thread turn
 - sandbox labels describe the Codex write policy, not full OS isolation; `Workspace write` and `Read only` still keep network enabled on the tested build
+- mirrored assistant responses preserve common Markdown formatting in Telegram; user/app echo stays plain text on purpose
 - Telegram images are currently downgraded to **text + attachment** before they enter Codex. This is intentional to avoid corrupting the Codex session payload.
 - Session switching mirrors the session history back to Telegram as display-only chat messages. This does not spend extra model tokens.
 - The current workflow is tied to the Windows Store build shape of Codex Desktop. If OpenAI changes the bundle layout, the patch scripts may need updates.
