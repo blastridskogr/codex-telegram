@@ -27,7 +27,6 @@ Main controls:
 - Session selection
 - New thread
 - Model selection
-- Speed selection
 - Reasoning effort selection
 - Permission / sandbox selection
 - Current status / current binding view
@@ -83,7 +82,7 @@ See [SECURITY.md](SECURITY.md) for publishing and token-handling rules.
 - Tested against Codex Desktop Store build `26.304.1528.x`
 - The patcher still depends on the current bundle shape of Codex Desktop
 - If OpenAI changes minified renderer/main bundle anchors, patch scripts may need updates
-- The first native `/new` turn does not expose a separately documented `serviceTier` field on the tested build
+- The portable app does not currently expose the official Fast/speed feature surface shown in the main Codex app UI
 - Sandbox labels reflect Codex write-policy behavior, not full OS isolation
 
 ## Practical use cases
@@ -92,4 +91,4 @@ See [SECURITY.md](SECURITY.md) for publishing and token-handling rules.
 - Switch between existing Codex sessions from Telegram
 - Start a new Codex thread from Telegram and continue in the app
 - Mirror recent session context into Telegram without spending extra model tokens
-- Adjust model, speed, reasoning, and permission settings without opening menus in the app
+- Adjust model, reasoning, and permission settings without opening menus in the app

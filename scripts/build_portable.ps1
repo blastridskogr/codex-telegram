@@ -66,6 +66,10 @@ try {
     Invoke-External 'node.exe' @('.\scripts\inject_native_telegram.mjs')
   }
 
+  Invoke-Step 'Verify injected main.js syntax' {
+    Invoke-External 'node.exe' @('--check', '.\work\full_extract\.vite\build\main.js')
+  }
+
   Invoke-Step 'Rebuild the patched app.asar' {
     Invoke-External 'node.exe' @('.\scripts\rebuild_patched_asar.mjs')
   }

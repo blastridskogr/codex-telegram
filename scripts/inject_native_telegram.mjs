@@ -80,29 +80,21 @@ function discoverRendererTarget() {
   return candidates[0];
 }
 
-function discoverImplementTodoRegistration(source, rendererFileName) {
-  const knownPattern = /function Xbe\(\)\{[\s\S]*?Io\(`implement-todo`,\w+\),null\}var /;
-  const knownMatch = source.match(knownPattern);
-  if (knownMatch) {
-    return {
-      functionName: "Xbe",
-      functionTailAnchor: knownMatch[0].slice(0, -4),
-    };
+function injectTelegramStartConversationCase(source, rendererFileName) {
+  const caseSource =
+    "case`telegram-start-conversation`:{try{let n=Array.isArray(e.input)?e.input:[],r=Array.isArray(e.attachments)?e.attachments:[],o=Array.isArray(e.workspaceRoots)?e.workspaceRoots.filter(e=>typeof e==`string`&&e.trim().length>0):[];o.length===0&&(o=(await kt(`active-workspace-roots`)).roots??[]);let s=typeof e.cwd==`string`&&e.cwd.trim().length>0?e.cwd:o[0]??null,c=e.collaborationMode??null;if(n.length===0)throw Error(`Missing input for telegram-start-conversation`);let l=await t.startConversation({input:n,attachments:r,cwd:s,workspaceRoots:o,collaborationMode:c});a(`/local/${l}`),Tr.dispatchMessage(`telegram-start-conversation-result`,{requestId:e.requestId,ok:!0,conversationId:l})}catch(n){Er.error(`telegram_start_conversation_failed`,{safe:{requestId:e.requestId??null},sensitive:{error:n}}),Tr.dispatchMessage(`telegram-start-conversation-result`,{requestId:e.requestId,ok:!1,error:n instanceof Error?n.message:String(n)})}break bb3}";
+  const exactAnchor = "case`implement-todo`:break bb3;";
+
+  if (source.includes(exactAnchor)) {
+    return source.replace(exactAnchor, `${caseSource}${exactAnchor}`);
   }
 
-  const fallbackPattern = /function\s+(\w+)\(\)\{[\s\S]*?Io\(`implement-todo`,\w+\),null\}var /;
-  const blockMatch = source.match(fallbackPattern);
-  if (!blockMatch) {
-    throw new Error(`Could not find the top-level implement-todo block in ${rendererFileName}`);
-  }
-
-  const functionName = blockMatch[1];
-  const functionTailAnchor = blockMatch[0].slice(0, -4);
-
-  return {
-    functionName,
-    functionTailAnchor,
-  };
+  return replaceRegexOnce(
+    source,
+    /case`implement-todo`:[\s\S]*?break bb3;/,
+    (match) => `${caseSource}${match}`,
+    `renderer implement-todo case in ${rendererFileName}`
+  );
 }
 
 if (!fs.existsSync(mainPath)) {
@@ -117,24 +109,32 @@ const rendererTarget = discoverRendererTarget();
 const rendererPath = rendererTarget.filePath;
 let renderer = rendererTarget.source;
 
-const setNamePattern = /m\.app\.setName\([^;]+?\),XA\(\);|m\.app\.setName\(`Codex`\);|m\.app\.setName\("Codex"\);/;
+const setNamePattern = /m\.app\.setName\([^;]+?\),\w+\(\);|m\.app\.setName\(`Codex`\);|m\.app\.setName\("Codex"\);/;
 if (!setNamePattern.test(main)) {
   throw new Error("Could not find the Codex app name assignment in main.js");
 }
 if (!main.includes("Codex Portable")) {
-  main = main.replace(setNamePattern, "m.app.setName(`Codex Portable`);XA();");
+  main = main.replace(setNamePattern, "m.app.setName(`Codex Portable`);ate();");
 }
 
-const appIdPattern = /m\.app\.setAppUserModelId\(`[^`]+`\)|m\.app\.setAppUserModelId\("[^"]+"\)/;
+const appIdPattern = /m\.app\.setAppUserModelId\([^;]+?\)/;
 if (appIdPattern.test(main)) {
-  main = main.replace(appIdPattern, "m.app.setAppUserModelId(`com.openai.codexportable`)");
+  main = main.replace(appIdPattern, "(m.app.setAppUserModelId(`com.openai.codexportable`))");
+  main = main.replace(
+    /&&m\.app\.setAppUserModelId\(`com\.openai\.codexportable`\)\);/g,
+    "&&(m.app.setAppUserModelId(`com.openai.codexportable`));"
+  );
+  main = main.replace(
+    /&&\((m\.app\.setAppUserModelId\(`com\.openai\.codexportable`\))\)\);/g,
+    "&&($1);"
+  );
 }
 
 if (!main.includes("telegram-start-conversation-result")) {
-  main = replaceOnce(
+  main = replaceRegexOnce(
     main,
-    "m.ipcMain.handle(`codex_desktop:message-from-view`,async(e,t)=>{if(!w9(e))return;",
-    "m.ipcMain.handle(`codex_desktop:message-from-view`,async(e,t)=>{if(!w9(e))return;if(t.type===`telegram-start-conversation-result`){let n=globalThis.__codexTelegramStartConversationRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve(t.conversationId):r.reject(Error(t.error||`Failed to create conversation`)))}return}",
+    /m\.ipcMain\.handle\(`codex_desktop:message-from-view`,async\(e,t\)=>\{if\(!(\w+)\(e\)\)return;/,
+    "m.ipcMain.handle(`codex_desktop:message-from-view`,async(e,t)=>{if(!$1(e))return;if(t.type===`telegram-start-conversation-result`){let n=globalThis.__codexTelegramStartConversationRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve(t.conversationId):r.reject(Error(t.error||`Failed to create conversation`)))}return}",
     "main ipc handler"
   );
 }
@@ -145,33 +145,18 @@ if (!main.includes("startNewThreadTurn:")) {
   if (existingBootstrapPattern.test(main)) {
     main = main.replace(existingBootstrapPattern, bootstrapReplacement);
   } else {
-    main = replaceOnce(
+    main = replaceRegexOnce(
       main,
-      "var c9=process.env.CODEX_ELECTRON_AGENT_RUN_ID?.trim()||null;",
-      `${bootstrapReplacement}var c9=process.env.CODEX_ELECTRON_AGENT_RUN_ID?.trim()||null;`,
+      /var\s+\w+=process\.env\.CODEX_ELECTRON_AGENT_RUN_ID\?\.trim\(\)\|\|null;/,
+      match => `${bootstrapReplacement}${match}`,
       "portable telegram bootstrap anchor"
     );
   }
 }
 
-if (!renderer.includes("telegram-start-conversation")) {
+if (!renderer.includes("case`telegram-start-conversation`:")) {
   const rendererFileName = path.basename(rendererPath);
-  const implementTodo = discoverImplementTodoRegistration(renderer, rendererFileName);
-  const telegramHandlerSource = "async function SkTelegramStartConversationHandler({request:e,mcpManager:t,navigate:n}){let r=e?.requestId??null;try{let i=Array.isArray(e?.input)?e.input:[],a=Array.isArray(e?.attachments)?e.attachments:[],o=Array.isArray(e?.workspaceRoots)?e.workspaceRoots.filter(e=>typeof e=='string'&&e.trim().length>0):[];o.length===0&&(o=(await ut(`active-workspace-roots`)).roots??[]);let s=typeof e?.cwd=='string'&&e.cwd.trim().length>0?e.cwd:o[0]??null,c=e?.collaborationMode??null;if(i.length===0)throw Error(`Missing input for telegram-start-conversation`);let l=await t.startConversation({input:i,attachments:a,cwd:s,workspaceRoots:o,collaborationMode:c});n(`/local/${l}`),Ro.dispatchMessage(`telegram-start-conversation-result`,{requestId:r,ok:!0,conversationId:l})}catch(i){zo.error(`Failed to handle telegram-start-conversation`,{safe:{requestId:r},sensitive:{error:i}}),Ro.dispatchMessage(`telegram-start-conversation-result`,{requestId:r,ok:!1,error:i instanceof Error?i.message:String(i)})}}function SkTelegramStartConversationRegistration(){let e=(0,Q.c)(3),t=Xn(),n=I(),r;return e[0]!==t||e[1]!==n?(r=e=>{SkTelegramStartConversationHandler({request:e,mcpManager:t,navigate:n})},e[0]=t,e[1]=n,e[2]=r):r=e[2],Io(`telegram-start-conversation`,r),null}";
-  renderer = replaceOnce(
-    renderer,
-    `${implementTodo.functionTailAnchor}var `,
-    `${implementTodo.functionTailAnchor}${telegramHandlerSource}var `,
-    `renderer implement-todo block in ${rendererFileName}`
-  );
-
-  const registrationAnchor = `(0,$.jsx)(cc,{extension:!0,children:(0,$.jsx)(${implementTodo.functionName},{})})`;
-  renderer = insertOnceAtAnchor(
-    renderer,
-    registrationAnchor,
-    ",(0,$.jsx)(cc,{electron:!0,children:(0,$.jsx)(SkTelegramStartConversationRegistration,{})})",
-    `renderer registration mount for ${implementTodo.functionName}`
-  );
+  renderer = injectTelegramStartConversationCase(renderer, rendererFileName);
 }
 
 fs.writeFileSync(mainPath, main, "utf8");

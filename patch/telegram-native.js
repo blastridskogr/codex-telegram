@@ -28,7 +28,6 @@ const CODEX_COMMANDS = [
     { command: "codex_new", description: "Open a real Codex New Thread draft in the app." },
     { command: "codex_session", description: "Pick the active Codex session." },
     { command: "codex_model", description: "Pick the Codex model." },
-    { command: "codex_speed", description: "Pick the Codex speed." },
     { command: "codex_reasoning", description: "Pick the Codex reasoning effort." },
     { command: "codex_permission", description: "Pick the Codex permission mode." },
     { command: "codex_sandbox", description: "Pick the Codex sandbox mode." },
@@ -48,10 +47,6 @@ const REASONING_LABELS = {
     high: "High",
     xhigh: "Extra High",
 };
-const SPEED_OPTIONS = [
-    { id: "standard", label: "Standard", value: null },
-    { id: "fast", label: "Fast", value: "fast" },
-];
 const START_MESSAGE = "Codex Portable Telegram is online. Use /help for commands.";
 const HELP_MESSAGE = [
     "Commands:",
@@ -64,7 +59,6 @@ const HELP_MESSAGE = [
     "/unbind - remove the current chat binding",
     "",
     "Controls:",
-    "/speed - pick speed",
     "/model - pick model",
     "/reasoning - pick reasoning",
     "/permission - pick permission",
@@ -1571,7 +1565,7 @@ class CodexIpcClient {
                 approvalPolicy: null,
                 sandboxPolicy: buildSandboxPolicy(settings.sandbox ?? null, settings.workspaceRoots || []),
                 model: settings.model ?? null,
-                serviceTier: settings.serviceTier ?? null,
+                serviceTier: null,
                 effort: settings.effort ?? null,
                 outputSchema: null,
                 collaborationMode: null,
@@ -1831,7 +1825,6 @@ class CodexAppDirectCompanion {
             { command: "sessions", description: "Pick a recent Codex session." },
             { command: "controls", description: "Open the Codex control panel." },
             { command: "model", description: "Pick the Codex model." },
-            { command: "speed", description: "Pick the Codex speed." },
             { command: "reasoning", description: "Pick the Codex reasoning effort." },
             { command: "permission", description: "Pick the Codex permission mode." },
             { command: "sandbox", description: "Pick the Codex sandbox mode." },
@@ -1864,7 +1857,6 @@ class CodexAppDirectCompanion {
         const modelSummary = settings.model == null
             ? `${DEFAULT_LABEL} (${this.modelCatalog.getCurrentModel(settings.model) || "-"})`
             : labelForOption(modelOptions, settings.model);
-        const speedSummary = labelForOption(SPEED_OPTIONS, settings.serviceTier);
         const effortSummary = settings.effort == null
             ? `${DEFAULT_LABEL} (${this.modelCatalog.getCurrentEffort(settings.effort, settings.model) || "-"})`
             : labelForOption(effortOptions, settings.effort);
@@ -1872,7 +1864,6 @@ class CodexAppDirectCompanion {
             `Current session: ${sessionInfo?.title || sessionId}`,
             `Session ID: ${sessionInfo?.sessionId || "-"}`,
             `Model: ${modelSummary}`,
-            `Speed: ${speedSummary}`,
             `Reasoning: ${effortSummary}`,
             `Permission: ${labelForOption(SANDBOX_OPTIONS, settings.sandbox)}`,
         ].join("\n");
@@ -1905,7 +1896,6 @@ class CodexAppDirectCompanion {
                     [{ text: "New Thread", callback_data: "action:new-thread" }],
                     [{ text: "Session", callback_data: "menu:session" }],
                     [{ text: "Model", callback_data: "menu:model" }],
-                    [{ text: "Speed", callback_data: "menu:speed" }],
                     [{ text: "Reasoning", callback_data: "menu:effort" }],
                     [{ text: "Permission", callback_data: "menu:permission" }],
                 ],
@@ -2053,11 +2043,6 @@ class CodexAppDirectCompanion {
                     ? `${DEFAULT_LABEL} (${this.modelCatalog.getCurrentModel(settings.model) || "-"})`
                     : labelForOption(modelOptions, settings.model),
                 options: modelOptions,
-            },
-            speed: {
-                title: "Speed selection",
-                current: labelForOption(SPEED_OPTIONS, settings.serviceTier),
-                options: SPEED_OPTIONS,
             },
             effort: {
                 title: "Reasoning selection",
@@ -2329,7 +2314,6 @@ class CodexAppDirectCompanion {
         const settings = this.chatSettings.get(chatId);
         const optionMap = {
             model: this.modelCatalog.getModelOptions(),
-            speed: SPEED_OPTIONS,
             effort: this.modelCatalog.getEffortOptions(settings.model),
             sandbox: SANDBOX_OPTIONS,
         };
@@ -2340,8 +2324,7 @@ class CodexAppDirectCompanion {
             return;
         }
 
-        const patchKey = kind === "speed" ? "serviceTier" : kind;
-        const patch = { [patchKey]: selected.value };
+        const patch = { [kind]: selected.value };
         if (kind === "model") {
             const nextEffortOptions = this.modelCatalog.getEffortOptions(selected.value);
             if (settings.effort && !nextEffortOptions.some((option) => option.value === settings.effort)) {
@@ -2382,7 +2365,6 @@ class CodexAppDirectCompanion {
                 "/codex_new [prompt]",
                 "/codex_session",
                 "/codex_model",
-                "/codex_speed",
                 "/codex_reasoning",
                 "/codex_permission",
                 "/codex_sandbox",
@@ -2422,7 +2404,7 @@ class CodexAppDirectCompanion {
             return true;
         }
         if (text === "/speed" || text === "/codex_speed") {
-            await this.showOptionPicker(chatId, "speed");
+            await this.api.sendMessage(chatId, "Fast/speed is not available in the portable app.");
             return true;
         }
         if (text === "/reasoning" || text === "/codex_reasoning") {

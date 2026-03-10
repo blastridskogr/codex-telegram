@@ -7,6 +7,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $packageRoot = Join-Path $repoRoot 'work\\portable_package_root'
 $exe = Join-Path $packageRoot 'app\\Codex.exe'
 $defaultUserDataDir = Join-Path $env:LOCALAPPDATA 'CodexPortableData'
+$wrapperDir = Join-Path $repoRoot 'work\\launch'
 $userDataDir = if ($InstanceName -eq 'default') {
   $defaultUserDataDir
 } else {
@@ -30,13 +31,32 @@ if (-not $ConfigPath) {
   $ConfigPath = Join-Path $userDataDir 'telegram-native.json'
 }
 
+$officialPackage = Get-AppxPackage -Name 'OpenAI.Codex' | Sort-Object Version -Descending | Select-Object -First 1
+if ($null -eq $officialPackage) {
+  throw 'The official OpenAI.Codex package is not installed.'
+}
+
 New-Item -ItemType Directory -Force $userDataDir | Out-Null
+New-Item -ItemType Directory -Force $wrapperDir | Out-Null
 
-$command = @"
-`$env:CODEX_ALLOW_MULTI_INSTANCE='1'
-`$env:CODEX_PORTABLE_USER_DATA_DIR='$userDataDir'
-`$env:CODEX_TELEGRAM_NATIVE_CONFIG='$ConfigPath'
-& '$exe' '--user-data-dir=$userDataDir'
-"@
+$wrapperPath = Join-Path $wrapperDir ("launch_portable_{0}.vbs" -f $InstanceName)
+$escapedExe = $exe.Replace("""", """""")
+$escapedUserDataDir = $userDataDir.Replace("""", """""")
+$escapedConfigPath = $ConfigPath.Replace("""", """""")
+$wrapperLines = @(
+  'Option Explicit',
+  'Dim shell',
+  'Set shell = CreateObject("WScript.Shell")',
+  'shell.Environment("Process")("CODEX_ALLOW_MULTI_INSTANCE") = "1"',
+  ('shell.Environment("Process")("CODEX_PORTABLE_USER_DATA_DIR") = "' + $escapedUserDataDir + '"'),
+  ('shell.Environment("Process")("CODEX_TELEGRAM_NATIVE_CONFIG") = "' + $escapedConfigPath + '"'),
+  ('shell.Run """" & "' + $escapedExe + '" & """ --user-data-dir=""" & "' + $escapedUserDataDir + '" & """", 1, False')
+)
+Set-Content -Path $wrapperPath -Value $wrapperLines -Encoding ASCII
 
-Start-Process -FilePath powershell.exe -ArgumentList '-NoProfile', '-Command', $command
+$args = '"' + $wrapperPath + '"'
+Invoke-CommandInDesktopPackage `
+  -PackageFamilyName $officialPackage.PackageFamilyName `
+  -AppId 'App' `
+  -Command 'wscript.exe' `
+  -Args $args

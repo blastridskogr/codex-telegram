@@ -9,7 +9,7 @@ The runtime supports both the short alias form and the `codex_*` prefixed form.
 | `/help` | `/codex_help` | show the Telegram control commands |
 | `/status` | `/codex_status` | show runtime health, pipe, bindings path, inbox path, workspace roots |
 | `/controls` | `/codex_controls` | open the main control keyboard |
-| `/current` | `/codex_current` | show current session, model, speed, reasoning, permission |
+| `/current` | `/codex_current` | show current session, model, reasoning, permission |
 | `/new [prompt]` | `/codex_new [prompt]` | open a real native Codex new-thread flow |
 | `/session` | `/codex_session` | open the recent-session picker |
 | `/unbind` | `/codex_unbind` | remove the current chat binding |
@@ -38,22 +38,10 @@ Behavior:
 
 The model list is loaded from the local Codex model cache, not hardcoded.
 
-## Speed controls
+## Fast/speed
 
-- `/speed`
-- `/codex_speed`
-
-Official labels:
-
-- `Standard`
-- `Fast`
-
-Internally this maps to the Codex `serviceTier` field.
-
-Note:
-
-- bound-session turns receive `serviceTier`
-- the very first turn of a native `/new` flow follows Codex's exposed `startConversation(...)` surface on the tested build, which exposes `model` and `reasoning` but not a separate documented `serviceTier` field
+- The portable app does not currently expose the official Fast/speed feature surface shown in the main Codex app UI.
+- `/speed` and `/codex_speed` remain as compatibility commands and now reply that Fast is not available in the portable app.
 
 ## Reasoning controls
 

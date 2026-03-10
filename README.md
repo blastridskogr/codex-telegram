@@ -16,7 +16,7 @@ Feature overview: [docs/FEATURES.md](docs/FEATURES.md)
 - injects Telegram control **inside the app process**
 - binds a Telegram chat to a Codex session
 - opens a real Codex **New Thread** and binds the new session from Telegram
-- lets Telegram switch session, model, speed, reasoning, and permission
+- lets Telegram switch session, model, reasoning, and permission
 - replays only the latest 5 completed instruction/result pairs, oldest-to-newest within that latest set, when you switch sessions
 
 ## What this repo intentionally does not include
@@ -111,7 +111,6 @@ Examples:
 - `/new` or `/codex_new`
 - `/session` or `/codex_session`
 - `/model` or `/codex_model`
-- `/speed` or `/codex_speed`
 - `/reasoning` or `/codex_reasoning`
 - `/permission` or `/codex_permission`
 - `/sandbox` or `/codex_sandbox`
@@ -122,7 +121,7 @@ Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 ## Known behavior
 
 - `/new` opens a real native Codex new-thread flow. The first Telegram message after that creates the real thread and auto-binds the returned session id.
-- the native new-thread path on the tested Codex build exposes `model` and `reasoning` through `startConversation(...)`; `speed/serviceTier` continues to apply on bound-session turns, but not as a separate documented field on that very first new-thread turn
+- the portable app does not currently expose the official Fast/speed feature surface that appears in the main Codex app UI
 - sandbox labels describe the Codex write policy, not full OS isolation; `Workspace write` and `Read only` still keep network enabled on the tested build
 - mirrored assistant responses preserve common Markdown formatting in Telegram; user/app echo stays plain text on purpose
 - Telegram images are currently downgraded to **text + attachment** before they enter Codex. This is intentional to avoid corrupting the Codex session payload.

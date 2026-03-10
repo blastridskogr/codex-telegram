@@ -11,9 +11,7 @@
   "defaultLanguage": "ko",
   "defaultSettings": {
     "model": null,
-    "serviceTier": null,
     "effort": null,
     "sandbox": null
   }
 }
-
