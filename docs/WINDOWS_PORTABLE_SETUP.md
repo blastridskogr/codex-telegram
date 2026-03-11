@@ -101,6 +101,8 @@ node .\scripts\update_portable_asar_integrity.mjs
 
 Without this step the portable app usually exits before `main.js` runs.
 
+This step requires the copied portable `Codex.exe` to be closed. If the portable app is still running, the rewrite can fail with `EBUSY`.
+
 ## 8. Create the local Telegram config
 
 ```powershell
@@ -120,11 +122,13 @@ Set:
 - `allowedChatIds`
 - `workspaceRoots`
 
-## 9. Register the portable package
+## 9. Optional: register the portable package
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\register_portable_package.ps1
 ```
+
+Registration is not required for routine launch. The launcher can start the copied app by borrowing the official `OpenAI.Codex` desktop-package context.
 
 ## 10. Launch the portable app
 
@@ -132,7 +136,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\register_portable_package.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\launch_portable_codex.ps1 -InstanceName default
 ```
 
-The launch script blocks startup if the official Store app is already running. Use one app at a time.
+The launch script:
+
+- warns if the official Store app is already running
+- sets `CODEX_ALLOW_MULTI_INSTANCE=1`
+- launches the copied portable app through `Invoke-CommandInDesktopPackage`
+
+Running both app instances is possible, but keep only one active Telegram poller and prefer a single Codex instance while debugging runtime issues.
 
 ## Runtime files
 
@@ -140,7 +150,7 @@ Typical runtime paths:
 
 - config: `%LOCALAPPDATA%\CodexPortableData\telegram-native.json`
 - bootstrap log: `%TEMP%\codex-portable-telegram-bootstrap.log`
-- runtime log: `%LOCALAPPDATA%\Packages\OpenAI.CodexPortable_2p2nqsd0c76g0\LocalCache\Local\CodexPortableData\telegram-native.log`
+- runtime log: `%LOCALAPPDATA%\CodexPortableData\telegram-native.log`
 
 ## Updating after a Codex release
 

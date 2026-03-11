@@ -4,19 +4,17 @@ Telegram control surface for a **portable patched Codex Desktop app on Windows**
 
 [Features](docs/FEATURES.md) | [Windows](docs/WINDOWS_PORTABLE_SETUP.md) | [Telegram Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
-This repository documents and packages the **patching method**, **Telegram runtime source**, and **setup scripts**. It does **not** ship OpenAI's application binaries.
+This repository contains the **patching method**, **Telegram runtime source**, and **setup scripts** for driving the real Codex desktop app from Telegram. It does **not** ship OpenAI binaries.
 
 Keywords: `codex`, `telegram`, `windows`, `portable`, `desktop`, `electron`.
 
-Feature overview: [docs/FEATURES.md](docs/FEATURES.md)
-
 ## What this does
 
-- patches a locally installed Codex Desktop package into a side-by-side portable package
-- injects Telegram control **inside the app process**
-- binds a Telegram chat to a Codex session
-- opens a real Codex **New Thread** and binds the new session from Telegram
-- lets Telegram switch session, model, reasoning, and permission
+- patches your locally installed Codex Desktop package into a portable copy
+- injects Telegram control **inside the Codex app process**
+- binds one Telegram chat to one Codex conversation
+- opens a real Codex **New Thread** draft and lets the first Telegram message create the real thread
+- drives the same app-facing model, Fast, reasoning, permission, and current-state paths that the Codex UI uses
 - replays only the latest 5 completed instruction/result pairs, oldest-to-newest within that latest set, when you switch sessions
 
 ## What this repo intentionally does not include
@@ -31,7 +29,7 @@ You build the portable package from **your own local Codex installation**.
 ## Tested baseline
 
 - Windows 11
-- Codex Desktop Store package `26.304.1528.x`
+- Codex Desktop Store package `26.306.996.0`
 - Node.js 24+
 - PowerShell 5.1+
 
@@ -44,7 +42,7 @@ You build the portable package from **your own local Codex installation**.
 - [scripts/rebuild_patched_asar.mjs](scripts/rebuild_patched_asar.mjs): rebuilds the patched `app.asar`
 - [scripts/update_portable_asar_integrity.mjs](scripts/update_portable_asar_integrity.mjs): rewrites the Windows EXE integrity metadata after `app.asar` changes
 - [scripts/register_portable_package.ps1](scripts/register_portable_package.ps1): registers the patched portable package
-- [scripts/launch_portable_codex.ps1](scripts/launch_portable_codex.ps1): launches the portable app
+- [scripts/launch_portable_codex.ps1](scripts/launch_portable_codex.ps1): launches the portable app by borrowing the official `OpenAI.Codex` package context
 - [examples/telegram-native.example.json](examples/telegram-native.example.json): safe example config
 - [docs/WINDOWS_PORTABLE_SETUP.md](docs/WINDOWS_PORTABLE_SETUP.md): end-to-end Windows setup
 - [docs/TELEGRAM_BOT_SETUP.md](docs/TELEGRAM_BOT_SETUP.md): BotFather and chat id setup
@@ -83,14 +81,19 @@ This one command does the full local patch pipeline:
 - copies the rebuilt `app.asar` back into the package root
 - rewrites the Electron integrity metadata
 
-4. Register and launch the portable package:
+4. Launch the portable package:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\register_portable_package.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\launch_portable_codex.ps1 -InstanceName default
 ```
 
-If you already created the local config and want one command for build + register + launch:
+Registering the copied package is optional. Do it only if you specifically want a visible `OpenAI.CodexPortable` package registration:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\register_portable_package.ps1
+```
+
+If you already created the local config and want one command for build + optional register + launch:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Register -Launch
@@ -98,31 +101,59 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Register 
 
 ## Important operating rules
 
-- Run **either** the official Codex app **or** the portable app, not both. Running both can cause duplicated input and follower/session conflicts.
+- The launcher only **warns** if the official Codex app is already running. It sets `CODEX_ALLOW_MULTI_INSTANCE=1` and continues.
+- Even though dual launch is allowed, keep only one active Telegram poller for the bot and prefer one Codex instance while debugging runtime issues.
 - Rotate your Telegram bot token before publishing if it was ever pasted into a chat, terminal, or screenshot.
-- Do not commit `telegram-native.json`, chat bindings, logs, or any `work/` output.
+- Run `powershell -ExecutionPolicy Bypass -File .\scripts\prepublish_secret_check.ps1` before you commit or push.
+
+## What belongs on GitHub
+
+Publishable:
+
+- `patch/`
+- `scripts/`
+- `docs/`
+- `examples/`
+- `README.md`
+- `package.json` and `package-lock.json`
+- `.gitignore`
+
+Local-only:
+
+- `telegram-native.json`
+- runtime state such as `chat_bindings.json` and `chat_settings.json`
+- `work/`
+- `tasks/`
+- `FILE_MAP.md`
+- `HANDOFF.md`
+- `HANDOFF_DETAILED.md`
+- `PROJECT_CONTEXT.md`
 
 ## Telegram controls
 
-Short aliases and `codex_*` prefixed commands are both supported.
+General commands stay plain. Codex control commands use the `codex_*` prefix.
 
 Examples:
 
-- `/new` or `/codex_new`
-- `/session` or `/codex_session`
-- `/model` or `/codex_model`
-- `/reasoning` or `/codex_reasoning`
-- `/permission` or `/codex_permission`
-- `/sandbox` or `/codex_sandbox`
-- `/current` or `/codex_current`
+- `/help`
+- `/status`
+- `/codex_new`
+- `/codex_session`
+- `/codex_model`
+- `/codex_fast`
+- `/codex_reasoning`
+- `/codex_permission`
+- `/codex_current`
 
 Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 
 ## Known behavior
 
-- `/new` opens a real native Codex new-thread flow. The first Telegram message after that creates the real thread and auto-binds the returned session id.
-- the portable app does not currently expose the official Fast/speed feature surface that appears in the main Codex app UI
-- sandbox labels describe the Codex write policy, not full OS isolation; `Workspace write` and `Read only` still keep network enabled on the tested build
+- `/codex_new` opens a real native Codex new-thread flow. The first Telegram message after that creates the real thread and auto-binds the returned session id.
+- `/codex_current` reads the live app state through the injected renderer bridge when the app surface is available.
+- Fast is exposed in Telegram as `/codex_fast` and maps to the Codex `serviceTier` setting.
+- Permission is exposed in Telegram as `/codex_permission` and matches the app-facing permission picker.
+- `/codex_sandbox` is kept only as a compatibility redirect to `/codex_permission`.
 - mirrored assistant responses preserve common Markdown formatting in Telegram; user/app echo stays plain text on purpose
 - Telegram images are currently downgraded to **text + attachment** before they enter Codex. This is intentional to avoid corrupting the Codex session payload.
 - Session switching replays only the latest 5 completed instruction/result pairs, ordered chronologically within that latest set, back to Telegram as display-only chat messages. On the tested build the result side is taken from `task_complete.last_agent_message` when available. This does not spend extra model tokens.

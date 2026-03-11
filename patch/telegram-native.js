@@ -21,18 +21,28 @@ const DEFAULT_TURN_INJECT_RETRY_COUNT = 3;
 const DEFAULT_TURN_INJECT_RETRY_DELAY_MS = 900;
 const DEFAULT_LABEL = "Default";
 const DEFAULT_PERMISSION_LABEL = "Basic permission";
+const FAST_OPTIONS = [
+    { id: "standard", label: "Standard", value: null },
+    { id: "fast", label: "Fast", value: "fast" },
+];
+const PERMISSION_MODE_OPTIONS = [
+    { id: "default", label: "Default permissions", value: null },
+    { id: "full-access", label: "Full access", value: "full-access" },
+    { id: "custom", label: "Custom (config.toml)", value: "custom" },
+];
 const CODEX_COMMANDS = [
     { command: "codex_help", description: "Show Codex Telegram commands." },
     { command: "codex_controls", description: "Open the Codex control panel." },
-    { command: "codex_current", description: "Show the current Codex chat settings." },
+    { command: "codex_current", description: "Show the current Codex app state." },
     { command: "codex_new", description: "Open a real Codex New Thread draft in the app." },
     { command: "codex_session", description: "Pick the active Codex session." },
+    { command: "codex_bind", description: "Bind this chat to a Codex session." },
+    { command: "codex_bindindex", description: "Bind this chat using a recent session index." },
     { command: "codex_model", description: "Pick the Codex model." },
+    { command: "codex_fast", description: "Pick the Codex Fast mode." },
     { command: "codex_reasoning", description: "Pick the Codex reasoning effort." },
     { command: "codex_permission", description: "Pick the Codex permission mode." },
-    { command: "codex_sandbox", description: "Pick the Codex sandbox mode." },
     { command: "codex_unbind", description: "Unbind this chat from the current Codex session." },
-    { command: "codex_status", description: "Show Codex Telegram runtime status." },
 ];
 const SANDBOX_OPTIONS = [
     { id: "default", label: DEFAULT_PERMISSION_LABEL, value: null },
@@ -47,28 +57,19 @@ const REASONING_LABELS = {
     high: "High",
     xhigh: "Extra High",
 };
-const START_MESSAGE = "Codex Portable Telegram is online. Use /help for commands.";
+const START_MESSAGE = "Codex Portable Telegram is online. Use /help for general commands and /codex_help for Codex controls.";
 const HELP_MESSAGE = [
-    "Commands:",
-    "/help - show commands",
+    "General commands:",
+    "/start - show the startup message",
+    "/help - show general commands",
     "/status - show runtime status",
-    "/current - show current chat binding",
-    "/new [prompt] - open a real Codex new-thread draft in the app",
-    "/session or /sessions - list recent Codex app sessions",
-    "/bind <session_id> - bind this chat to a specific session",
-    "/unbind - remove the current chat binding",
+    "/codex_help - show Codex control commands",
     "",
-    "Controls:",
-    "/model - pick model",
-    "/reasoning - pick reasoning",
-    "/permission - pick permission",
-    "/sandbox - pick sandbox",
-    "",
-    "After binding, send text, images, or documents and they will be injected into the bound Codex app session.",
+    "Codex controls are exposed only through /codex_* commands.",
 ].join("\n");
 const UNAUTHORIZED_MESSAGE = "This Telegram chat is not allowed to control the Codex Portable Telegram runtime.";
-const NO_SESSION_MESSAGE = "This chat is not bound to a Codex session. Use /session or /bind <session_id>.";
-const NO_SESSION_PICKER_MESSAGE = "This chat is not bound to a Codex session. Pick a recent session below or use /bind <session_id>.";
+const NO_SESSION_MESSAGE = "This chat is not bound to a Codex session. Use /codex_session or /codex_bind <session_id>.";
+const NO_SESSION_PICKER_MESSAGE = "This chat is not bound to a Codex session. Pick a recent session below or use /codex_bind <session_id>.";
 
 function formatError(error) {
     if (error instanceof Error) {
@@ -86,6 +87,34 @@ function appendBootstrapLog(message) {
 
 function ensureDir(dirPath) {
     fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function readJsonObject(filePath, fallback = {}) {
+    try {
+        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch {
+        return { ...fallback };
+    }
+}
+
+function writeJsonObject(filePath, value) {
+    ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, JSON.stringify(value, null, 2), "utf8");
+}
+
+function updateCodexPersistedAtomState(filePath, key, value) {
+    const payload = readJsonObject(filePath, {});
+    const atomState = payload["electron-persisted-atom-state"] && typeof payload["electron-persisted-atom-state"] === "object"
+        ? { ...payload["electron-persisted-atom-state"] }
+        : {};
+    if (value == null) {
+        delete atomState[key];
+    } else {
+        atomState[key] = value;
+    }
+    payload["electron-persisted-atom-state"] = atomState;
+    writeJsonObject(filePath, payload);
+    return value == null ? null : atomState[key] ?? null;
 }
 
 function delay(ms) {
@@ -135,6 +164,9 @@ function loadConfig(configPath) {
     const workspaceRoots = Array.isArray(parsed.workspaceRoots)
         ? parsed.workspaceRoots.map((item) => resolvePath(baseDir, item)).filter(Boolean)
         : [];
+    const codexHome = process.env.CODEX_HOME
+        ? path.resolve(process.env.CODEX_HOME)
+        : path.join(os.homedir(), ".codex");
 
     return {
         configPath: absoluteConfigPath,
@@ -150,10 +182,13 @@ function loadConfig(configPath) {
         defaultLanguage: String(parsed.defaultLanguage || "ko").trim().toLowerCase(),
         codexIpcPipe: String(parsed.codexIpcPipe || DEFAULT_PIPE),
         workspaceRoots,
+        codexHome,
+        codexGlobalStatePath: path.join(codexHome, ".codex-global-state.json"),
         defaultSettings: {
             model: parsed.defaultSettings?.model ?? null,
             serviceTier: parsed.defaultSettings?.serviceTier ?? null,
             effort: parsed.defaultSettings?.effort ?? null,
+            permissionMode: normalizePermissionMode(parsed.defaultSettings?.permissionMode ?? inferPermissionModeFromSandboxValue(parsed.defaultSettings?.sandbox)),
             sandbox: parsed.defaultSettings?.sandbox ?? null,
         },
     };
@@ -376,12 +411,54 @@ function labelForOption(options, value) {
     return match ? match.label : (value == null ? DEFAULT_LABEL : String(value));
 }
 
+function normalizePermissionMode(value) {
+    if (value == null) {
+        return null;
+    }
+    const normalized = String(value).trim().toLowerCase();
+    if (!normalized || normalized === "default" || normalized === "auto") {
+        return null;
+    }
+    if (normalized === "danger-full-access" || normalized === "full-access") {
+        return "full-access";
+    }
+    if (normalized === "custom") {
+        return "custom";
+    }
+    return normalized;
+}
+
+function permissionModeToSandboxValue(permissionMode) {
+    const normalized = normalizePermissionMode(permissionMode);
+    if (normalized === "full-access") {
+        return "danger-full-access";
+    }
+    return null;
+}
+
+function inferPermissionModeFromSandboxValue(sandbox) {
+    if (sandbox === "danger-full-access") {
+        return "full-access";
+    }
+    return null;
+}
+
+function formatPermissionLabel(settings) {
+    const permissionMode = normalizePermissionMode(settings?.permissionMode ?? inferPermissionModeFromSandboxValue(settings?.sandbox));
+    if (permissionMode != null || settings?.sandbox == null) {
+        return labelForOption(PERMISSION_MODE_OPTIONS, permissionMode);
+    }
+    return `${labelForOption(SANDBOX_OPTIONS, settings.sandbox)} (legacy)`;
+}
+
 function normalizeChatSettings(raw) {
+    const permissionMode = normalizePermissionMode(raw?.permissionMode ?? inferPermissionModeFromSandboxValue(raw?.sandbox));
     return {
         model: raw?.model ?? null,
         serviceTier: raw?.serviceTier ?? null,
         effort: raw?.effort ?? null,
-        sandbox: raw?.sandbox ?? null,
+        permissionMode,
+        sandbox: raw?.sandbox ?? permissionModeToSandboxValue(permissionMode),
     };
 }
 
@@ -686,6 +763,9 @@ function buildSandboxPolicy(kind, workspaceRoots) {
     if (!kind) {
         return null;
     }
+    if (kind === "full-access") {
+        kind = "danger-full-access";
+    }
     if (kind === "danger-full-access") {
         return { type: "danger-full-access" };
     }
@@ -808,6 +888,7 @@ function migrateLegacyConfigToPortable(userDataPath) {
                 model: legacy.defaultSettings?.model ?? null,
                 serviceTier: legacy.defaultSettings?.serviceTier ?? null,
                 effort: legacy.defaultSettings?.effort ?? null,
+                permissionMode: normalizePermissionMode(legacy.defaultSettings?.permissionMode ?? inferPermissionModeFromSandboxValue(legacy.defaultSettings?.sandbox)),
                 sandbox: legacy.defaultSettings?.sandbox ?? null,
             },
         };
@@ -1075,6 +1156,10 @@ class ModelCatalog {
         return this.modelOptions.slice();
     }
 
+    getSelectableModelOptions() {
+        return this.getModelOptions().filter((option) => option.value != null);
+    }
+
     getEffortOptions(selectedModel) {
         this.refresh();
         const model = this.modelMap.get(this.getCurrentModel(selectedModel));
@@ -1098,6 +1183,10 @@ class ModelCatalog {
             }
         }
         return options;
+    }
+
+    getSelectableEffortOptions(selectedModel) {
+        return this.getEffortOptions(selectedModel).filter((option) => option.value != null);
     }
 }
 
@@ -1565,7 +1654,7 @@ class CodexIpcClient {
                 approvalPolicy: null,
                 sandboxPolicy: buildSandboxPolicy(settings.sandbox ?? null, settings.workspaceRoots || []),
                 model: settings.model ?? null,
-                serviceTier: null,
+                serviceTier: settings.serviceTier ?? null,
                 effort: settings.effort ?? null,
                 outputSchema: null,
                 collaborationMode: null,
@@ -1817,18 +1906,9 @@ class CodexAppDirectCompanion {
 
     async syncCommands() {
         const commands = [
-            { command: "help", description: "Show Codex app direct commands." },
+            { command: "start", description: "Show the Codex Portable Telegram startup message." },
+            { command: "help", description: "Show general Telegram commands." },
             { command: "status", description: "Show runtime status." },
-            { command: "current", description: "Show current chat settings." },
-            { command: "new", description: "Open a real Codex New Thread draft in the app." },
-            { command: "session", description: "Pick a recent Codex session." },
-            { command: "sessions", description: "Pick a recent Codex session." },
-            { command: "controls", description: "Open the Codex control panel." },
-            { command: "model", description: "Pick the Codex model." },
-            { command: "reasoning", description: "Pick the Codex reasoning effort." },
-            { command: "permission", description: "Pick the Codex permission mode." },
-            { command: "sandbox", description: "Pick the Codex sandbox mode." },
-            { command: "unbind", description: "Unbind this chat from the current session." },
             ...CODEX_COMMANDS,
         ];
         const merged = new Map();
@@ -1848,25 +1928,115 @@ class CodexAppDirectCompanion {
         }
     }
 
-    formatSettingsSummary(chatId) {
-        const settings = this.chatSettings.get(chatId);
-        const sessionId = this.bindings.getSession(chatId) || "(not bound)";
-        const sessionInfo = sessionId !== "(not bound)" ? this.catalog.findSessionEntry(sessionId) : null;
+    getNativeConversationTarget(chatId) {
+        const sessionId = this.bindings.getSession(chatId) || null;
+        if (sessionId) {
+            return { conversationId: sessionId, isBoundSession: true, isPendingDraft: false };
+        }
+        const pending = this.pendingNewThread.get(chatId);
+        if (pending?.active) {
+            return { conversationId: null, isBoundSession: false, isPendingDraft: true };
+        }
+        return null;
+    }
+
+    buildChatSettingsPatchFromAppState(state) {
+        if (!state || typeof state !== "object") {
+            return {};
+        }
+        const patch = {};
+        if (Object.prototype.hasOwnProperty.call(state, "model")) {
+            patch.model = state.model ?? null;
+        }
+        if (Object.prototype.hasOwnProperty.call(state, "reasoningEffort")) {
+            patch.effort = state.reasoningEffort ?? null;
+        }
+        if (Object.prototype.hasOwnProperty.call(state, "serviceTier")) {
+            patch.serviceTier = state.serviceTier ?? null;
+        }
+        if (Object.prototype.hasOwnProperty.call(state, "permissionMode")) {
+            const permissionMode = normalizePermissionMode(state.permissionMode);
+            patch.permissionMode = permissionMode;
+            patch.sandbox = permissionModeToSandboxValue(permissionMode);
+        }
+        return patch;
+    }
+
+    async refreshChatSettingsFromApp(chatId, reason = "telegram_refresh") {
+        if (typeof this.config.getCurrentAppState !== "function") {
+            return null;
+        }
+        const target = this.getNativeConversationTarget(chatId);
+        if (!target) {
+            return null;
+        }
+        try {
+            const state = await this.config.getCurrentAppState({
+                conversationId: target.conversationId,
+                reason,
+            });
+            const patch = this.buildChatSettingsPatchFromAppState(state);
+            if (Object.keys(patch).length) {
+                this.chatSettings.update(chatId, patch);
+            }
+            return state || null;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.warn(`getCurrentAppState failed chat=${chatId} reason=${reason} error=${message}`);
+            return null;
+        }
+    }
+
+    buildSettingsSummaryLines(chatId, settings, appState = null) {
+        const boundSessionId = this.bindings.getSession(chatId) || null;
+        const sessionInfo = boundSessionId ? this.catalog.findSessionEntry(boundSessionId) : null;
+        const pending = this.pendingNewThread.get(chatId);
         const modelOptions = this.modelCatalog.getModelOptions();
         const effortOptions = this.modelCatalog.getEffortOptions(settings.model);
         const modelSummary = settings.model == null
             ? `${DEFAULT_LABEL} (${this.modelCatalog.getCurrentModel(settings.model) || "-"})`
             : labelForOption(modelOptions, settings.model);
+        const fastSummary = labelForOption(FAST_OPTIONS, settings.serviceTier);
         const effortSummary = settings.effort == null
             ? `${DEFAULT_LABEL} (${this.modelCatalog.getCurrentEffort(settings.effort, settings.model) || "-"})`
             : labelForOption(effortOptions, settings.effort);
-        return [
-            `Current session: ${sessionInfo?.title || sessionId}`,
-            `Session ID: ${sessionInfo?.sessionId || "-"}`,
+        const lines = [
+            `Current session: ${sessionInfo?.title || boundSessionId || (pending?.active ? "(new thread draft)" : "(not bound)")}`,
+            `Session ID: ${sessionInfo?.sessionId || boundSessionId || "-"}`,
+        ];
+        if (appState) {
+            lines.push(`App route: ${appState.path || "-"}`);
+            lines.push(`App conversation: ${appState.conversationId || (pending?.active ? "(new thread draft)" : "-")}`);
+            if (boundSessionId && appState.conversationId && appState.conversationId !== boundSessionId) {
+                lines.push(`App conversation mismatch: ${appState.conversationId}`);
+            }
+        }
+        lines.push(
             `Model: ${modelSummary}`,
+            `Fast: ${fastSummary}`,
             `Reasoning: ${effortSummary}`,
-            `Permission: ${labelForOption(SANDBOX_OPTIONS, settings.sandbox)}`,
-        ].join("\n");
+            `Permission: ${formatPermissionLabel(settings)}`,
+        );
+        return lines;
+    }
+
+    formatSettingsSummary(chatId) {
+        return this.buildSettingsSummaryLines(chatId, this.chatSettings.get(chatId)).join("\n");
+    }
+
+    async formatCurrentStateSummary(chatId) {
+        const target = this.getNativeConversationTarget(chatId);
+        const appState = await this.refreshChatSettingsFromApp(chatId, "telegram_current");
+        const settings = this.chatSettings.get(chatId);
+        const lines = this.buildSettingsSummaryLines(chatId, settings, appState);
+        if (!target) {
+            lines.splice(2, 0, "App target: bind a session or open /codex_new first.");
+        } else if (typeof this.config.getCurrentAppState !== "function") {
+            lines.splice(2, 0, "App state: unavailable in this build.");
+        } else if (!appState) {
+            lines.splice(2, 0, "App state: unavailable.");
+        }
+        return lines.join("\n");
     }
 
     formatStatus(chatId = null) {
@@ -1896,6 +2066,7 @@ class CodexAppDirectCompanion {
                     [{ text: "New Thread", callback_data: "action:new-thread" }],
                     [{ text: "Session", callback_data: "menu:session" }],
                     [{ text: "Model", callback_data: "menu:model" }],
+                    [{ text: "Fast", callback_data: "menu:fast" }],
                     [{ text: "Reasoning", callback_data: "menu:effort" }],
                     [{ text: "Permission", callback_data: "menu:permission" }],
                 ],
@@ -1937,7 +2108,7 @@ class CodexAppDirectCompanion {
                 ? "This Telegram chat was unbound from the previous session so messages do not go to the wrong thread."
                 : "This Telegram chat is currently unbound.",
             "Codex creates the new session id when the first turn is sent.",
-            "Send the first message in Codex, then use /session or /codex_session to bind the new thread.",
+            "Send the first message in Codex, then use /codex_session to bind the new thread.",
         ];
         await this.api.sendMessage(chatId, lines.join("\n\n"));
         return true;
@@ -1970,6 +2141,7 @@ class CodexAppDirectCompanion {
 
         this.pendingNewThread.clear(chatId);
         this.bindings.bind(chatId, conversationId);
+        await this.refreshChatSettingsFromApp(chatId, "start_pending_new_thread");
 
         const suppressionMessage = {
             text: String(turnPayload?.prompt || "").trim(),
@@ -2005,7 +2177,7 @@ class CodexAppDirectCompanion {
         const lines = [
             "Updated the real Codex New Thread draft in the app with your latest Telegram message.",
             "This is still a native draft. Codex creates the session id only when you press Send in Codex.",
-            "After that, use /session or /codex_session to bind the new thread.",
+            "After that, use /codex_session to bind the new thread.",
         ];
         await this.api.sendMessage(chatId, lines.join("\n\n"));
         return true;
@@ -2034,8 +2206,8 @@ class CodexAppDirectCompanion {
 
     buildOptionPickerMessage(chatId, kind) {
         const settings = this.chatSettings.get(chatId);
-        const modelOptions = this.modelCatalog.getModelOptions();
-        const effortOptions = this.modelCatalog.getEffortOptions(settings.model);
+        const modelOptions = this.modelCatalog.getSelectableModelOptions();
+        const effortOptions = this.modelCatalog.getSelectableEffortOptions(settings.model);
         const configMap = {
             model: {
                 title: "Model selection",
@@ -2043,6 +2215,11 @@ class CodexAppDirectCompanion {
                     ? `${DEFAULT_LABEL} (${this.modelCatalog.getCurrentModel(settings.model) || "-"})`
                     : labelForOption(modelOptions, settings.model),
                 options: modelOptions,
+            },
+            fast: {
+                title: "Fast selection",
+                current: labelForOption(FAST_OPTIONS, settings.serviceTier),
+                options: FAST_OPTIONS,
             },
             effort: {
                 title: "Reasoning selection",
@@ -2053,14 +2230,14 @@ class CodexAppDirectCompanion {
             },
             permission: {
                 title: "Permission selection",
-                current: labelForOption(SANDBOX_OPTIONS, settings.sandbox),
-                options: SANDBOX_OPTIONS,
-                patchKey: "sandbox",
+                current: formatPermissionLabel(settings),
+                options: PERMISSION_MODE_OPTIONS,
             },
             sandbox: {
-                title: "Sandbox selection",
-                current: labelForOption(SANDBOX_OPTIONS, settings.sandbox),
-                options: SANDBOX_OPTIONS,
+                title: "Permission selection",
+                current: formatPermissionLabel(settings),
+                options: PERMISSION_MODE_OPTIONS,
+                patchKey: "permission",
             },
         };
         const config = configMap[kind];
@@ -2101,6 +2278,7 @@ class CodexAppDirectCompanion {
     }
 
     async showMainControls(chatId) {
+        await this.refreshChatSettingsFromApp(chatId, "show_main_controls");
         const panel = this.buildMainControlsMessage(chatId);
         await this.api.sendMessageWithMarkup(chatId, panel.text, panel.replyMarkup);
     }
@@ -2196,16 +2374,40 @@ class CodexAppDirectCompanion {
     }
 
     async bindChatToSession(chatId, sessionId, callbackId = null) {
+        const previousSessionId = this.bindings.getSession(chatId) || null;
         const result = this.bindings.bind(chatId, sessionId);
-        if (callbackId) {
-            await this.api.answerCallbackQuery(callbackId, result.ok ? "Session updated" : result.message);
-        }
-        if (result.ok) {
-            this.pendingNewThread.clear(chatId);
-            await this.sendSessionHistory(chatId, sessionId);
+        if (!result.ok) {
+            if (callbackId) {
+                await this.api.answerCallbackQuery(callbackId, result.message);
+            }
+            await this.api.sendMessage(chatId, result.message);
             return result;
         }
-        await this.api.sendMessage(chatId, result.message);
+
+        if (typeof this.config.ensureSessionOpen === "function") {
+            try {
+                await this.config.ensureSessionOpen(sessionId);
+            } catch (error) {
+                if (previousSessionId && previousSessionId !== sessionId) {
+                    this.bindings.bind(chatId, previousSessionId);
+                } else {
+                    this.bindings.unbind(chatId);
+                }
+                const message = error instanceof Error ? error.message : String(error);
+                if (callbackId) {
+                    await this.api.answerCallbackQuery(callbackId, "Failed to open session");
+                }
+                await this.api.sendMessage(chatId, `Failed to open session ${sessionId} in the Codex app.\n\n${message}`);
+                return { ok: false, message };
+            }
+        }
+
+        this.pendingNewThread.clear(chatId);
+        await this.refreshChatSettingsFromApp(chatId, "bind_session");
+        if (callbackId) {
+            await this.api.answerCallbackQuery(callbackId, "Session updated");
+        }
+        await this.sendSessionHistory(chatId, sessionId);
         return result;
     }
 
@@ -2213,6 +2415,21 @@ class CodexAppDirectCompanion {
         if (kind === "session") {
             await this.showSessionPicker(chatId);
             return;
+        }
+        const target = this.getNativeConversationTarget(chatId);
+        if (kind === "fast" && (!target || !target.isBoundSession)) {
+            await this.api.sendMessage(chatId, "Fast applies only to a real Codex session. Bind a session first.");
+            if (!target) {
+                await this.promptForBinding(chatId, "Bind a session first.");
+            }
+            return;
+        }
+        if (["model", "effort", "permission", "sandbox", "fast"].includes(kind)) {
+            if (!target) {
+                await this.promptForBinding(chatId, "Bind a session or open /codex_new first.");
+                return;
+            }
+            await this.refreshChatSettingsFromApp(chatId, `show_option_${kind}`);
         }
         const picker = this.buildOptionPickerMessage(chatId, kind);
         if (!picker) {
@@ -2268,6 +2485,80 @@ class CodexAppDirectCompanion {
         return null;
     }
 
+    async applyNativeOptionSelection(chatId, kind, selected, settings) {
+        const target = this.getNativeConversationTarget(chatId);
+        if (!target) {
+            throw new Error("Bind a session or open /codex_new first.");
+        }
+
+        if (kind === "fast") {
+            if (!target.isBoundSession) {
+                throw new Error("Fast applies only after the draft becomes a real Codex session.");
+            }
+            if (typeof this.config.setThreadServiceTier !== "function") {
+                throw new Error("Fast is unavailable in this portable build.");
+            }
+            await this.config.setThreadServiceTier({
+                conversationId: target.conversationId,
+                serviceTier: selected.value,
+                source: "telegram_fast_picker",
+            });
+            try {
+                updateCodexPersistedAtomState(this.config.codexGlobalStatePath, "default-service-tier", selected.value);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                this.logger.warn(`updateCodexPersistedAtomState failed after thread Fast update: ${message}`);
+            }
+            if (typeof this.config.setDefaultServiceTier === "function") {
+                try {
+                    await this.config.setDefaultServiceTier(selected.value);
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    this.logger.warn(`setDefaultServiceTier callback failed after thread Fast update: ${message}`);
+                }
+            }
+            return { serviceTier: selected.value };
+        }
+
+        if (kind === "model" || kind === "effort") {
+            if (typeof this.config.setModelAndReasoning !== "function") {
+                throw new Error("Model and reasoning controls are unavailable in this portable build.");
+            }
+            const model = kind === "model" ? selected.value : (settings.model ?? null);
+            const nextEffortOptions = this.modelCatalog.getEffortOptions(model);
+            const reasoningEffort = kind === "effort"
+                ? selected.value
+                : (settings.effort && nextEffortOptions.some((option) => option.value === settings.effort) ? settings.effort : null);
+            const result = await this.config.setModelAndReasoning({
+                conversationId: target.conversationId,
+                model,
+                reasoningEffort,
+            });
+            return {
+                model: result?.model ?? model ?? null,
+                effort: result?.reasoningEffort ?? reasoningEffort ?? null,
+            };
+        }
+
+        if (kind === "permission" || kind === "sandbox") {
+            if (typeof this.config.setPermissionMode !== "function") {
+                throw new Error("Permission control is unavailable in this portable build.");
+            }
+            const permissionMode = normalizePermissionMode(selected.value);
+            const result = await this.config.setPermissionMode({
+                conversationId: target.conversationId,
+                permissionMode,
+            });
+            const nextPermissionMode = normalizePermissionMode(result?.permissionMode ?? permissionMode);
+            return {
+                permissionMode: nextPermissionMode,
+                sandbox: permissionModeToSandboxValue(nextPermissionMode),
+            };
+        }
+
+        return { [kind]: selected.value };
+    }
+
     async handleCallbackQuery(update) {
         const callback = update.callback_query;
         const callbackId = callback?.id;
@@ -2311,11 +2602,14 @@ class CodexAppDirectCompanion {
             return;
         }
 
+        await this.refreshChatSettingsFromApp(chatId, `callback_${kind}`);
         const settings = this.chatSettings.get(chatId);
         const optionMap = {
-            model: this.modelCatalog.getModelOptions(),
-            effort: this.modelCatalog.getEffortOptions(settings.model),
-            sandbox: SANDBOX_OPTIONS,
+            model: this.modelCatalog.getSelectableModelOptions(),
+            fast: FAST_OPTIONS,
+            effort: this.modelCatalog.getSelectableEffortOptions(settings.model),
+            sandbox: PERMISSION_MODE_OPTIONS,
+            permission: PERMISSION_MODE_OPTIONS,
         };
         const options = optionMap[kind];
         const selected = options?.find((option) => option.id === rawValue);
@@ -2324,14 +2618,18 @@ class CodexAppDirectCompanion {
             return;
         }
 
-        const patch = { [kind]: selected.value };
-        if (kind === "model") {
-            const nextEffortOptions = this.modelCatalog.getEffortOptions(selected.value);
-            if (settings.effort && !nextEffortOptions.some((option) => option.value === settings.effort)) {
-                patch.effort = null;
-            }
+        let patch;
+        try {
+            patch = await this.applyNativeOptionSelection(chatId, kind, selected, settings);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(`applyNativeOptionSelection failed kind=${kind} error=${message}`);
+            await this.api.answerCallbackQuery(callbackId, "Failed to apply");
+            await this.api.sendMessage(chatId, `Failed to apply ${selected.label} in the Codex app.\n\n${message}`);
+            return;
         }
         this.chatSettings.update(chatId, patch);
+        await this.refreshChatSettingsFromApp(chatId, `post_${kind}`);
         await this.api.answerCallbackQuery(callbackId, `${kind} updated`);
         if (kind === "model") {
             const effortPicker = this.buildOptionPickerMessage(chatId, "effort");
@@ -2346,6 +2644,10 @@ class CodexAppDirectCompanion {
     }
 
     async handleCommand(chatId, text) {
+        const redirect = async (target) => {
+            await this.api.sendMessage(chatId, `Use ${target}.`);
+            return true;
+        };
         if (text === "/start") {
             await this.api.sendMessage(chatId, START_MESSAGE);
             if (!this.bindings.getSession(chatId)) {
@@ -2354,7 +2656,7 @@ class CodexAppDirectCompanion {
             return true;
         }
         if (text === "/help") {
-            await this.api.sendMessage(chatId, `${HELP_MESSAGE}\n/controls - open controls\n/model - pick model\n/reasoning - pick reasoning\n/permission - pick permission\n/sandbox - pick sandbox\n/codex_help - show codex-prefixed commands`);
+            await this.api.sendMessage(chatId, HELP_MESSAGE);
             return true;
         }
         if (text === "/codex_help") {
@@ -2364,82 +2666,121 @@ class CodexAppDirectCompanion {
                 "/codex_current",
                 "/codex_new [prompt]",
                 "/codex_session",
+                "/codex_bind <session_id>",
+                "/codex_bindindex <n>",
                 "/codex_model",
+                "/codex_fast",
                 "/codex_reasoning",
                 "/codex_permission",
-                "/codex_sandbox",
-                "/codex_status",
                 "/codex_unbind",
             ].join("\n"));
             return true;
         }
-        if (text === "/status" || text === "/codex_status") {
+        if (text === "/status") {
             await this.api.sendMessage(chatId, this.formatStatus(chatId));
             return true;
         }
-        if (text === "/controls" || text === "/codex_controls") {
+        if (text === "/codex_status") {
+            return redirect("/status");
+        }
+        if (text === "/controls") {
+            return redirect("/codex_controls");
+        }
+        if (text === "/codex_controls") {
             await this.showMainControls(chatId);
             return true;
         }
         if (text === "/new" || text.startsWith("/new ")) {
-            const prompt = text === "/new" ? "" : text.slice("/new".length).trim();
-            await this.openNewThread(chatId, prompt);
-            return true;
+            return redirect("/codex_new");
         }
         if (text === "/codex_new" || text.startsWith("/codex_new ")) {
             const prompt = text === "/codex_new" ? "" : text.slice("/codex_new".length).trim();
             await this.openNewThread(chatId, prompt);
             return true;
         }
-        if (text === "/current" || text === "/codex_current") {
-            await this.api.sendMessage(chatId, this.formatSettingsSummary(chatId));
+        if (text === "/current") {
+            return redirect("/codex_current");
+        }
+        if (text === "/codex_current") {
+            await this.api.sendMessage(chatId, await this.formatCurrentStateSummary(chatId));
             return true;
         }
-        if (text === "/session" || text === "/sessions" || text === "/codex_session") {
+        if (text === "/codex_session") {
             await this.showSessionPicker(chatId);
             return true;
         }
-        if (text === "/model" || text === "/codex_model") {
+        if (text === "/session" || text === "/sessions" || text === "/codex_sessions") {
+            await this.api.sendMessage(chatId, "Use /codex_session.");
+            return true;
+        }
+        if (text === "/model") {
+            return redirect("/codex_model");
+        }
+        if (text === "/codex_model") {
             await this.showOptionPicker(chatId, "model");
             return true;
         }
-        if (text === "/speed" || text === "/codex_speed") {
-            await this.api.sendMessage(chatId, "Fast/speed is not available in the portable app.");
+        if (text === "/speed" || text === "/fast" || text === "/codex_speed") {
+            return redirect("/codex_fast");
+        }
+        if (text === "/codex_fast") {
+            await this.showOptionPicker(chatId, "fast");
             return true;
         }
-        if (text === "/reasoning" || text === "/codex_reasoning") {
+        if (text === "/reasoning") {
+            return redirect("/codex_reasoning");
+        }
+        if (text === "/codex_reasoning") {
             await this.showOptionPicker(chatId, "effort");
             return true;
         }
-        if (text === "/permission" || text === "/codex_permission") {
+        if (text === "/permission") {
+            return redirect("/codex_permission");
+        }
+        if (text === "/codex_permission") {
             await this.showOptionPicker(chatId, "permission");
             return true;
         }
-        if (text === "/sandbox" || text === "/codex_sandbox") {
-            await this.showOptionPicker(chatId, "sandbox");
-            return true;
+        if (text === "/sandbox") {
+            return redirect("/codex_permission");
         }
-        if (text.startsWith("/bindindex ")) {
+        if (text === "/codex_sandbox") {
+            return redirect("/codex_permission");
+        }
+        if (text === "/bindindex" || text.startsWith("/bindindex ")) {
+            return redirect("/codex_bindindex");
+        }
+        if (text === "/codex_bindindex" || text.startsWith("/codex_bindindex ")) {
             const rawIndex = text.split(/\s+/, 2)[1]?.trim();
+            if (!rawIndex) {
+                await this.api.sendMessage(chatId, "Usage: /codex_bindindex <n>");
+                return true;
+            }
             const index = Number(rawIndex);
             const sessions = this.catalog.listRecentSessions();
             if (!Number.isInteger(index) || index < 1 || index > sessions.length) {
-                await this.api.sendMessage(chatId, `Invalid index. Use /sessions first. Available range: 1-${sessions.length}.`);
+                await this.api.sendMessage(chatId, `Invalid index. Use /codex_session first. Available range: 1-${sessions.length}.`);
                 return true;
             }
             await this.bindChatToSession(chatId, sessions[index - 1].sessionId);
             return true;
         }
-        if (text.startsWith("/bind ")) {
+        if (text === "/bind" || text.startsWith("/bind ")) {
+            return redirect("/codex_bind");
+        }
+        if (text === "/codex_bind" || text.startsWith("/codex_bind ")) {
             const sessionId = text.split(/\s+/, 2)[1]?.trim();
             if (!sessionId) {
-                await this.api.sendMessage(chatId, "Usage: /bind <session_id>");
+                await this.api.sendMessage(chatId, "Usage: /codex_bind <session_id>");
                 return true;
             }
             await this.bindChatToSession(chatId, sessionId);
             return true;
         }
-        if (text === "/unbind" || text === "/codex_unbind") {
+        if (text === "/unbind") {
+            return redirect("/codex_unbind");
+        }
+        if (text === "/codex_unbind") {
             const result = this.bindings.unbind(chatId);
             this.pendingNewThread.clear(chatId);
             await this.api.sendMessage(chatId, result.message);
@@ -2561,6 +2902,21 @@ async function bootWithConfigPath(configPath, options = {}) {
     if (typeof options.startNewThreadTurn === "function") {
         config.startNewThreadTurn = options.startNewThreadTurn;
     }
+    if (typeof options.setDefaultServiceTier === "function") {
+        config.setDefaultServiceTier = options.setDefaultServiceTier;
+    }
+    if (typeof options.setThreadServiceTier === "function") {
+        config.setThreadServiceTier = options.setThreadServiceTier;
+    }
+    if (typeof options.setModelAndReasoning === "function") {
+        config.setModelAndReasoning = options.setModelAndReasoning;
+    }
+    if (typeof options.setPermissionMode === "function") {
+        config.setPermissionMode = options.setPermissionMode;
+    }
+    if (typeof options.getCurrentAppState === "function") {
+        config.getCurrentAppState = options.getCurrentAppState;
+    }
     const logger = new OutputLogger(config.logPath);
     const app = new CodexAppDirectCompanion(config, logger);
     activeNativeApp = app;
@@ -2599,6 +2955,11 @@ async function startNativeTelegramBridge(options = {}) {
         ensureSessionOpen: options.ensureSessionOpen,
         openNewThread: options.openNewThread,
         startNewThreadTurn: options.startNewThreadTurn,
+        setDefaultServiceTier: options.setDefaultServiceTier,
+        setThreadServiceTier: options.setThreadServiceTier,
+        setModelAndReasoning: options.setModelAndReasoning,
+        setPermissionMode: options.setPermissionMode,
+        getCurrentAppState: options.getCurrentAppState,
     }).catch((error) => {
         appendBootstrapLog(`[start-error] ${formatError(error)}`);
         activeNativeStart = null;

@@ -2,7 +2,7 @@
 
 This project turns a **portable patched Codex Desktop app** into a Telegram-controlled Codex surface on Windows.
 
-It does **not** replace Codex with a separate bot backend. Telegram controls the same patched Codex app process and the same Codex sessions.
+It does **not** replace Codex with a separate bot backend. Telegram drives the same patched Codex app process and the same Codex conversations.
 
 ## Core model
 
@@ -16,19 +16,24 @@ It does **not** replace Codex with a separate bot backend. Telegram controls the
 
 - **Native New Thread**
   - Telegram can open a real Codex **New Thread** flow.
-  - The first Telegram message after `/new` creates the real Codex thread and auto-binds the returned session id.
+  - The first Telegram message after `/codex_new` creates the real Codex thread and auto-binds the returned session id.
+
+- **App-native controls**
+  - `/codex_model`, `/codex_fast`, `/codex_reasoning`, `/codex_permission`, and `/codex_current` use injected app-native paths instead of Telegram-only shadow state.
+  - Compatibility aliases such as `/codex_sandbox` redirect to the app wording instead of exposing a second control surface.
 
 ## Telegram control surface
 
-You can control the patched app from Telegram with both short commands and `codex_*` aliases.
+You can control the patched app from Telegram with plain general commands and `codex_*` Codex control commands.
 
 Main controls:
 
 - Session selection
 - New thread
 - Model selection
+- Fast mode selection
 - Reasoning effort selection
-- Permission / sandbox selection
+- Permission selection
 - Current status / current binding view
 
 See [TELEGRAM_COMMANDS.md](TELEGRAM_COMMANDS.md) for the full command list.
@@ -65,25 +70,26 @@ See [TELEGRAM_COMMANDS.md](TELEGRAM_COMMANDS.md) for the full command list.
 - Inject the Telegram runtime into the extracted bundle
 - Rebuild `app.asar`
 - Rewrite Electron integrity metadata so the patched package still launches
-- Register and launch the portable app side-by-side
+- Launch the copied portable app through the official `OpenAI.Codex` desktop-package context
+- Optionally register the copied package as `OpenAI.CodexPortable`
 
 See [WINDOWS_PORTABLE_SETUP.md](WINDOWS_PORTABLE_SETUP.md) for the full setup flow.
 
 ## Safety model
 
 - Telegram control is restricted by `allowedChatIds`
-- Bot token, bindings, logs, and runtime state stay local and are excluded from git
+- Bot token, bindings, logs, runtime state, and repo-local operator notes stay local and are excluded from git
 - The repository does **not** include OpenAI binaries or rebuilt proprietary bundles
 
 See [SECURITY.md](SECURITY.md) for publishing and token-handling rules.
 
 ## Current limitations
 
-- Tested against Codex Desktop Store build `26.304.1528.x`
+- Tested against Codex Desktop Store build `26.306.996.0`
 - The patcher still depends on the current bundle shape of Codex Desktop
 - If OpenAI changes minified renderer/main bundle anchors, patch scripts may need updates
-- The portable app does not currently expose the official Fast/speed feature surface shown in the main Codex app UI
-- Sandbox labels reflect Codex write-policy behavior, not full OS isolation
+- The integrity rewrite step requires the portable `Codex.exe` to be closed while rebuilding
+- Permission control now follows the app-facing permission picker
 
 ## Practical use cases
 
@@ -91,4 +97,4 @@ See [SECURITY.md](SECURITY.md) for publishing and token-handling rules.
 - Switch between existing Codex sessions from Telegram
 - Start a new Codex thread from Telegram and continue in the app
 - Mirror recent session context into Telegram without spending extra model tokens
-- Adjust model, reasoning, and permission settings without opening menus in the app
+- Adjust model, Fast mode, reasoning, and permission settings without opening menus in the app

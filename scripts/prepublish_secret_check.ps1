@@ -1,11 +1,33 @@
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $include = @('*.md', '*.json', '*.ps1', '*.mjs', '*.js', '.gitignore')
-$files = Get-ChildItem -Path $repoRoot -Recurse -File -Include $include |
-  Where-Object {
-    $_.FullName -notmatch '\\node_modules\\' -and
-    $_.FullName -notmatch '\\work\\' -and
-    $_.FullName -notmatch '\\.git\\'
+
+Push-Location $repoRoot
+try {
+  $relativeFiles = git ls-files --cached --others --exclude-standard
+  if ($LASTEXITCODE -ne 0) {
+    throw 'git ls-files failed.'
   }
+} finally {
+  Pop-Location
+}
+
+$files = foreach ($relativePath in $relativeFiles) {
+  $fullPath = Join-Path $repoRoot $relativePath
+  if (-not (Test-Path $fullPath -PathType Leaf)) {
+    continue
+  }
+  $file = Get-Item $fullPath
+  $matchesInclude = $false
+  foreach ($pattern in $include) {
+    if ($file.Name -like $pattern) {
+      $matchesInclude = $true
+      break
+    }
+  }
+  if ($matchesInclude) {
+    $file
+  }
+}
 
 $problems = @()
 

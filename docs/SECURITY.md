@@ -1,12 +1,30 @@
 # Security notes
 
-## Never publish these files
+## Publishable vs local-only
+
+Publishable:
+
+- `README.md`
+- `docs/`
+- `examples/`
+- `patch/`
+- `scripts/`
+- `package.json`
+- `package-lock.json`
+- `.gitignore`
+
+Local-only:
 
 - `telegram-native.json`
 - `chat_bindings.json`
 - `chat_settings.json`
 - `telegram-inbox/`
 - `logs/`
+- `tasks/`
+- `FILE_MAP.md`
+- `HANDOFF.md`
+- `HANDOFF_DETAILED.md`
+- `PROJECT_CONTEXT.md`
 - `work/portable_package_root/`
 - `work/full_extract/`
 - `work/app.patched.asar`
@@ -26,6 +44,8 @@ Run:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\prepublish_secret_check.ps1
 ```
+
+The script scans the files returned by `git ls-files --cached --others --exclude-standard`, so ignored local-only files do not block a clean publish.
 
 Then manually confirm:
 

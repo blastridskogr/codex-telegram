@@ -1,51 +1,66 @@
 # Telegram commands
 
-The runtime supports both the short alias form and the `codex_*` prefixed form.
+The runtime separates general bot commands from Codex control commands.
+
+- General bot commands stay plain.
+- Codex control commands use the `codex_*` prefix.
 
 ## Core commands
 
-| Short | Prefixed | Purpose |
-| --- | --- | --- |
-| `/help` | `/codex_help` | show the Telegram control commands |
-| `/status` | `/codex_status` | show runtime health, pipe, bindings path, inbox path, workspace roots |
-| `/controls` | `/codex_controls` | open the main control keyboard |
-| `/current` | `/codex_current` | show current session, model, reasoning, permission |
-| `/new [prompt]` | `/codex_new [prompt]` | open a real native Codex new-thread flow |
-| `/session` | `/codex_session` | open the recent-session picker |
-| `/unbind` | `/codex_unbind` | remove the current chat binding |
+| Command | Purpose |
+| --- | --- |
+| `/start` | show the startup message |
+| `/help` | show the general command groups |
+| `/status` | show runtime health, pipe, bindings path, inbox path, workspace roots |
+| `/codex_help` | show the Codex control commands |
+| `/codex_controls` | open the main Codex control keyboard |
+| `/codex_current` | show current session, model, Fast mode, reasoning, permission |
+| `/codex_new [prompt]` | open a real native Codex new-thread flow |
+| `/codex_session` | open the recent-session picker |
+| `/codex_bind <session_id>` | bind this chat to a specific session |
+| `/codex_bindindex <n>` | bind this chat to a session from the recent-session list |
+| `/codex_unbind` | remove the current chat binding |
+
+Compatibility redirects:
+
+- `/codex_sandbox` -> `/codex_permission`
+- `/sandbox` -> `/codex_permission`
+- `/codex_sessions` -> `/codex_session`
 
 ## Session commands
 
-- `/new`
 - `/codex_new`
-- `/session`
-- `/sessions`
-- `/bind <session_id>`
-- `/bindindex <n>`
+- `/codex_session`
+- `/codex_bind <session_id>`
+- `/codex_bindindex <n>`
 
 Behavior:
 
-- `/new` does **not** synthesize a fake session. It opens the real Codex new-thread flow.
-- the first Telegram message after `/new` creates the real thread through Codex and auto-binds the returned `conversationId`
+- `/codex_new` does **not** synthesize a fake session. It opens the real Codex new-thread draft in the app.
+- the first Telegram message after `/codex_new` creates the real thread through Codex and auto-binds the returned `conversationId`
 - the picker shows `session title + session id + last activity`
 - when you switch sessions, only the latest 5 completed instruction/result pairs are mirrored back into Telegram as display-only chat output, oldest-to-newest within that latest set
 - the history replay does **not** cost extra model tokens
 
 ## Model controls
 
-- `/model`
 - `/codex_model`
 
-The model list is loaded from the local Codex model cache, not hardcoded.
+The model list is loaded from the local Codex model cache, not hardcoded. The picker reflects the app's selectable model list rather than a Telegram-only default row.
 
-## Fast/speed
+## Fast controls
 
-- The portable app does not currently expose the official Fast/speed feature surface shown in the main Codex app UI.
-- `/speed` and `/codex_speed` remain as compatibility commands and now reply that Fast is not available in the portable app.
+- `/codex_fast`
+
+Official labels:
+
+- `Standard`
+- `Fast`
+
+Internally this maps to the Codex `serviceTier` field.
 
 ## Reasoning controls
 
-- `/reasoning`
 - `/codex_reasoning`
 
 Reasoning levels are model-dependent. Supported labels may include:
@@ -56,32 +71,25 @@ Reasoning levels are model-dependent. Supported labels may include:
 - `High`
 - `Extra High`
 
+The picker reflects the app's reasoning options for the currently selected model.
+
 ## Permission controls
 
-- `/permission`
 - `/codex_permission`
 
 These match the app-facing permission surface.
 
-## Sandbox compatibility controls
-
-- `/sandbox`
-- `/codex_sandbox`
-
-These remain available as compatibility aliases and open the same underlying picker.
-
 Supported values:
 
-- `Basic permission`
+- `Default permissions`
 - `Full access`
-- `Workspace write`
-- `Read only`
+- `Custom (config.toml)`
 
-Current behavior on the tested build:
+## Current-state view
 
-- `Full access` maps to Codex `danger-full-access`
-- `Workspace write` keeps network enabled and broad read access while limiting writes to the selected workspace roots
-- `Read only` still keeps network enabled and broad read access; the label describes the write policy, not full OS isolation
+- `/codex_current`
+
+This reads the live injected app state when the renderer bridge is available, including the current route, conversation id, model, Fast mode, reasoning, and permission mode.
 
 ## Media behavior
 

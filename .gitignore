@@ -1,3 +1,4 @@
+# Dependencies and build outputs
 node_modules/
 work/
 state/
@@ -8,9 +9,17 @@ portable_userdata/
 *.asar
 *.tmp
 *.bak
+
+# Local runtime state and secrets
 telegram-native.json
 chat_bindings.json
 chat_settings.json
 .env
 .env.*
 
+# Local operator notes and task tracking
+tasks/
+FILE_MAP.md
+HANDOFF.md
+HANDOFF_DETAILED.md
+PROJECT_CONTEXT.md
