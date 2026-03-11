@@ -1,5 +1,12 @@
 # Security
 
+## Compliance note
+
+- This is an unofficial workflow repository, not an OpenAI distribution channel.
+- Keep the repository limited to your own patch source, scripts, and documentation.
+- Do not publish OpenAI binaries, extracted proprietary bundles, or rebuilt portable outputs.
+- Before using or publishing the workflow, review the current OpenAI terms yourself and make your own compliance decision.
+
 ## Publishable vs local-only
 
 Publishable:

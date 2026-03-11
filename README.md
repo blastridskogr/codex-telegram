@@ -6,6 +6,12 @@ Telegram control surface for a locally patched **portable Codex Desktop app on W
 
 This repository contains the patch source, build scripts, and setup docs for driving the real Codex desktop app from Telegram. It does **not** include OpenAI binaries, rebuilt `app.asar`, or your runtime secrets.
 
+## Disclaimer
+
+- Unofficial project. It is **not** affiliated with, endorsed by, or published by OpenAI.
+- This repository documents a local patch/build workflow. It does **not** redistribute Codex binaries or patched portable outputs.
+- You are responsible for reviewing the current OpenAI terms and your local legal/compliance requirements before using, modifying, or publishing anything based on this workflow.
+
 ## Current status
 
 Verified baseline:
@@ -43,6 +49,8 @@ Working behavior in the current version:
 - Telegram bot token
 - personal chat id
 - logs, bindings, or runtime state
+
+That separation is intentional. The publishable repo is meant to explain the workflow and carry the patch source, not to ship OpenAI software.
 
 ## Quick start
 
@@ -126,6 +134,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\prepublish_secret_check.ps1
 - The launcher can run even if the official Store app is already open, but debugging is cleaner with one active Telegram poller.
 - Telegram Desktop may need a full restart before newly synced bot commands or menu buttons appear.
 - Rotate your Telegram bot token before publishing if it was ever exposed in chat, shell history, or screenshots.
+- If you publish a fork, keep the same boundary: your own source and docs are one thing; OpenAI binaries, extracted bundles, and patched outputs are another.
 
 ## Support
 
