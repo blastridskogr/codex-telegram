@@ -1436,6 +1436,14 @@ class TelegramApi {
         return this.call("setMyCommands", payload);
     }
 
+    setChatMenuButton(chatId = null, menuButton = { type: "commands" }) {
+        const payload = { menu_button: menuButton };
+        if (chatId != null) {
+            payload.chat_id = chatId;
+        }
+        return this.call("setChatMenuButton", payload);
+    }
+
     sendMessage(chatId, text, options = null) {
         const payload = { chat_id: chatId, text };
         if (options?.parseMode) {
@@ -1924,6 +1932,18 @@ class CodexAppDirectCompanion {
                 await this.api.setMyCommands([...merged.values()], scope);
             } catch (error) {
                 this.logger.warn(`command sync failed scope=${JSON.stringify(scope)} error=${error.message}`);
+            }
+        }
+        try {
+            await this.api.setChatMenuButton(null, { type: "commands" });
+        } catch (error) {
+            this.logger.warn(`menu button sync failed scope=default error=${error.message}`);
+        }
+        for (const chatId of this.config.allowedChatIds) {
+            try {
+                await this.api.setChatMenuButton(Number(chatId), { type: "commands" });
+            } catch (error) {
+                this.logger.warn(`menu button sync failed scope=chat chatId=${chatId} error=${error.message}`);
             }
         }
     }
