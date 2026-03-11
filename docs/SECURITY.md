@@ -1,4 +1,4 @@
-# Security notes
+# Security
 
 ## Publishable vs local-only
 
@@ -18,26 +18,23 @@ Local-only:
 - `telegram-native.json`
 - `chat_bindings.json`
 - `chat_settings.json`
-- `telegram-inbox/`
-- `logs/`
 - `tasks/`
 - `FILE_MAP.md`
 - `HANDOFF.md`
 - `HANDOFF_DETAILED.md`
 - `PROJECT_CONTEXT.md`
-- `work/portable_package_root/`
-- `work/full_extract/`
-- `work/app.patched.asar`
+- `work/`
+- repo-local logs, inbox dumps, and verification artifacts
 
-## Never publish these values
+## Never publish
 
 - Telegram bot token
 - personal `chat_id`
 - your Windows username
-- absolute local workspace paths
-- screenshots that show the token or your personal chat id
+- absolute user-profile paths
+- screenshots that expose the token or your private chat id
 
-## Before you push
+## Before every commit or push
 
 Run:
 
@@ -45,14 +42,17 @@ Run:
 powershell -ExecutionPolicy Bypass -File .\scripts\prepublish_secret_check.ps1
 ```
 
-The script scans the files returned by `git ls-files --cached --others --exclude-standard`, so ignored local-only files do not block a clean publish.
+The script now does two checks:
+
+- scans tracked and non-ignored files for likely Telegram tokens, live chat ids, and user-specific paths
+- fails if known local-only files are tracked in git at all
 
 Then manually confirm:
 
-- no token is present in any JSON, Markdown, PowerShell, or log file
-- no bare `123456789:token...` value is present in config or docs, even without a `bot` URL prefix
-- no user-specific `C:\\Users\\<name>` path is committed
-- no live chat id is committed
+- no token appears in Markdown, JSON, PowerShell, or JavaScript
+- no real chat id appears in docs, examples, or config
+- no local-only operator notes or task files are tracked
+- no runtime artifact from `work/` is staged for commit
 
 ## If the token was ever exposed
 

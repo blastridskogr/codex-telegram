@@ -73,9 +73,75 @@ const NO_SESSION_PICKER_MESSAGE = "This chat is not bound to a Codex session. Pi
 
 function formatError(error) {
     if (error instanceof Error) {
+        if (error.codexIpcError != null) {
+            const payload = safeJsonStringify(error.codexIpcError);
+            return `${error.stack || error.message}\nIPC payload: ${payload}`;
+        }
         return error.stack || error.message;
     }
+    if (error && typeof error === "object") {
+        return safeJsonStringify(error);
+    }
     return String(error);
+}
+
+function safeJsonStringify(value) {
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return String(value);
+    }
+}
+
+function normalizeIpcErrorPayload(payload) {
+    if (payload == null) {
+        return { message: "IPC request failed.", code: null, payload: null };
+    }
+    if (payload instanceof Error) {
+        return {
+            message: payload.message || "IPC request failed.",
+            code: typeof payload.code === "string" ? payload.code : null,
+            payload,
+        };
+    }
+    if (typeof payload === "string") {
+        return { message: payload, code: null, payload };
+    }
+    if (typeof payload === "object") {
+        const code = typeof payload.code === "string"
+            ? payload.code
+            : typeof payload.errorCode === "string"
+                ? payload.errorCode
+                : typeof payload.type === "string"
+                    ? payload.type
+                    : null;
+        const message = typeof payload.message === "string"
+            ? payload.message
+            : typeof payload.error === "string"
+                ? payload.error
+                : typeof payload.description === "string"
+                    ? payload.description
+                    : null;
+        const summary = [code, message].filter(Boolean).join(": ");
+        return {
+            message: summary || safeJsonStringify(payload),
+            code,
+            payload,
+        };
+    }
+    return { message: String(payload), code: null, payload };
+}
+
+function isRetryableTurnInjectError(error) {
+    const code = String(error?.code || "").toLowerCase();
+    const message = String(error?.message || error || "").toLowerCase();
+    return code.includes("no-client-found")
+        || code.includes("no_client_found")
+        || message.includes("no-client-found")
+        || message.includes("no client found")
+        || message.includes("client not found")
+        || message.includes("unavailable in the renderer")
+        || (message.includes("timed out") && message.includes("bound turn"));
 }
 
 function appendBootstrapLog(message) {
@@ -1612,7 +1678,15 @@ class CodexIpcClient {
             }
             this.pendingRequests.delete(frame.requestId);
             if (frame.resultType === "error" || frame.error) {
-                pending.reject(new Error(frame.error || "IPC request failed."));
+                const normalizedError = normalizeIpcErrorPayload(frame.error || null);
+                const error = new Error(normalizedError.message || "IPC request failed.");
+                if (normalizedError.code) {
+                    error.code = normalizedError.code;
+                }
+                if (normalizedError.payload != null) {
+                    error.codexIpcError = normalizedError.payload;
+                }
+                pending.reject(error);
                 return;
             }
             pending.resolve(frame.result || {});
@@ -1736,25 +1810,36 @@ class AppBroadcastMonitor {
             workspaceRoots: this.config.workspaceRoots,
             ...(settingsOverride || {}),
         };
+        const useBoundTurnBridge = typeof this.config.submitBoundThreadTurn === "function";
         let lastError = null;
         for (let attempt = 1; attempt <= DEFAULT_TURN_INJECT_RETRY_COUNT; attempt += 1) {
             if (typeof this.config.ensureSessionOpen === "function") {
                 await this.config.ensureSessionOpen(sessionId);
             }
-            if (!this.socketReady()) {
+            if (!useBoundTurnBridge && !this.socketReady()) {
                 await this.connectWithRetry();
             }
             this.logger.info(`inject session=${sessionId} attempt=${attempt} inputs=${turnPayload.input.length} attachments=${turnPayload.attachments.length}`);
             try {
-                await this.ipc.startTurnWithContent(sessionId, turnPayload.input, turnPayload.attachments, settings);
+                if (useBoundTurnBridge) {
+                    await this.config.submitBoundThreadTurn({
+                        conversationId: sessionId,
+                        input: turnPayload.input,
+                        attachments: turnPayload.attachments,
+                        cwd: settings.cwd ?? null,
+                        workspaceRoots: settings.workspaceRoots || this.config.workspaceRoots,
+                        settings,
+                    });
+                } else {
+                    await this.ipc.startTurnWithContent(sessionId, turnPayload.input, turnPayload.attachments, settings);
+                }
                 return;
             } catch (error) {
                 lastError = error;
-                const message = String(error?.message || error);
-                if (!message.includes("no-client-found") || attempt === DEFAULT_TURN_INJECT_RETRY_COUNT) {
+                if (!isRetryableTurnInjectError(error) || attempt === DEFAULT_TURN_INJECT_RETRY_COUNT) {
                     throw error;
                 }
-                this.logger.warn(`inject retry after no-client-found session=${sessionId} attempt=${attempt}`);
+                this.logger.warn(`inject retry after transient client miss session=${sessionId} attempt=${attempt} error=${String(error?.message || error)}`);
                 await delay(DEFAULT_TURN_INJECT_RETRY_DELAY_MS);
             }
         }
@@ -2937,6 +3022,9 @@ async function bootWithConfigPath(configPath, options = {}) {
     if (typeof options.getCurrentAppState === "function") {
         config.getCurrentAppState = options.getCurrentAppState;
     }
+    if (typeof options.submitBoundThreadTurn === "function") {
+        config.submitBoundThreadTurn = options.submitBoundThreadTurn;
+    }
     const logger = new OutputLogger(config.logPath);
     const app = new CodexAppDirectCompanion(config, logger);
     activeNativeApp = app;
@@ -2980,6 +3068,7 @@ async function startNativeTelegramBridge(options = {}) {
         setModelAndReasoning: options.setModelAndReasoning,
         setPermissionMode: options.setPermissionMode,
         getCurrentAppState: options.getCurrentAppState,
+        submitBoundThreadTurn: options.submitBoundThreadTurn,
     }).catch((error) => {
         appendBootstrapLog(`[start-error] ${formatError(error)}`);
         activeNativeStart = null;

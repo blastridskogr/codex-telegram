@@ -32,6 +32,8 @@ This one command runs the full local patch pipeline:
 - copy the rebuilt `app.asar` back into the package root
 - rewrite the Electron integrity metadata in `Codex.exe`
 
+Close the portable `Codex.exe` before rebuilding. If it is still running, the integrity rewrite step can fail with `EBUSY`.
+
 If you already installed dependencies, use:
 
 ```powershell
@@ -143,6 +145,16 @@ The launch script:
 - launches the copied portable app through `Invoke-CommandInDesktopPackage`
 
 Running both app instances is possible, but keep only one active Telegram poller and prefer a single Codex instance while debugging runtime issues.
+
+## 11. Pre-publish check
+
+Before you commit or push, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\prepublish_secret_check.ps1
+```
+
+This checks the current git-visible tree for tokens, chat ids, user-specific paths, and tracked local-only files.
 
 ## Runtime files
 

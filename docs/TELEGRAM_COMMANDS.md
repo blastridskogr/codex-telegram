@@ -38,6 +38,8 @@ Behavior:
 
 - `/codex_new` does **not** synthesize a fake session. It opens the real Codex new-thread draft in the app.
 - the first Telegram message after `/codex_new` creates the real thread through Codex and auto-binds the returned `conversationId`
+- after `/codex_bind` or `/codex_session`, plain Telegram follow-up text is submitted through the app-native bound-thread follow-up path
+- bind/switch actions open the real Codex conversation in the app before Telegram treats the binding as live
 - the picker shows `session title + session id + last activity`
 - when you switch sessions, only the latest 5 completed instruction/result pairs are mirrored back into Telegram as display-only chat output, oldest-to-newest within that latest set
 - the history replay does **not** cost extra model tokens
@@ -90,6 +92,11 @@ Supported values:
 - `/codex_current`
 
 This reads the live injected app state when the renderer bridge is available, including the current route, conversation id, model, Fast mode, reasoning, and permission mode.
+
+## Desktop command visibility
+
+- the runtime syncs the bot command list and the private-chat menu button automatically
+- Telegram Desktop can still lag behind Bot API state; if commands do not appear, fully restart Telegram Desktop once
 
 ## Media behavior
 

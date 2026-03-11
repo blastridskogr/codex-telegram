@@ -23,6 +23,8 @@ Useful BotFather commands:
 
 If you plan to use the bot only in a private chat, no group-specific setting is required.
 
+The portable runtime syncs the bot command list itself when it starts. You do not need to manually keep BotFather commands in sync after every code change.
+
 ## 3. Get your chat id
 
 1. Open the new bot
@@ -64,3 +66,7 @@ Never commit:
 - `logs/`
 
 This repository's `.gitignore` already blocks those paths. Keep it that way.
+
+## 6. Telegram Desktop note
+
+If command buttons or slash-command suggestions show up on mobile but not on Telegram Desktop, restart Telegram Desktop once. The Bot API state can already be correct while the Desktop client UI is still stale.

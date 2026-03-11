@@ -133,6 +133,12 @@ function injectTelegramGetCurrentStateCase(source, rendererFileName) {
   return upsertRendererCase(source, "telegram-get-current-state", caseSource, rendererFileName);
 }
 
+function injectTelegramSubmitBoundTurnCase(source, rendererFileName) {
+  const caseSource =
+    "case`telegram-submit-bound-turn`:{try{let n=i.getForHostIdOrThrowWhenDefaultHost(e.hostId??null);if(n==null)throw Error(`Conversation manager unavailable for host ${e.hostId??`local`}`);let r=e.conversationId??null,o=Array.isArray(e.input)?e.input:[],s=Array.isArray(e.attachments)?e.attachments:[];if(!r)throw Error(`Missing conversationId for telegram-submit-bound-turn`);if(o.length===0)throw Error(`Missing input for telegram-submit-bound-turn`);let c=null;for(let l=0;l<16;l++){if(c=n.getConversation(r),c)break;await new Promise(e=>setTimeout(e,250))}if(!c)throw Error(`Conversation ${r} is unavailable in the renderer`);let l=c.turns[c.turns.length-1]??null,u=We([]),d=typeof e.cwd==`string`&&e.cwd.trim().length>0?e.cwd:c.cwd??null,f=e.settings??null;await yn(n,r,{input:o,cwd:d,approvalPolicy:e.approvalPolicy??l?.params?.approvalPolicy??u.approvalPolicy,sandboxPolicy:e.sandboxPolicy??l?.params?.sandboxPolicy??u.sandboxPolicy,model:e.model??f?.model??null,effort:e.effort??f?.effort??null,attachments:s,collaborationMode:e.collaborationMode??l?.params?.collaborationMode??c.latestCollaborationMode??null}),Tr.dispatchMessage(`telegram-submit-bound-turn-result`,{requestId:e.requestId,ok:!0,conversationId:r})}catch(n){Er.error(`telegram_submit_bound_turn_failed`,{safe:{requestId:e.requestId??null,conversationId:e.conversationId??null},sensitive:{error:n}}),Tr.dispatchMessage(`telegram-submit-bound-turn-result`,{requestId:e.requestId,ok:!1,error:n instanceof Error?n.message:String(n)})}break bb3}";
+  return upsertRendererCase(source, "telegram-submit-bound-turn", caseSource, rendererFileName);
+}
+
 if (!fs.existsSync(mainPath)) {
   throw new Error(`Extracted main.js not found: ${mainPath}`);
 }
@@ -211,6 +217,15 @@ if (!main.includes("telegram-get-current-state-result")) {
   );
 }
 
+if (!main.includes("telegram-submit-bound-turn-result")) {
+  main = replaceRegexOnce(
+    main,
+    /if\(t\.type===`telegram-get-current-state-result`\)\{let n=globalThis\.__codexTelegramGetCurrentStateRequests;if\(n\)\{let r=n\.get\(t\.requestId\);r&&\(n\.delete\(t\.requestId\),t\.ok\?r\.resolve\(t\.state\?\?null\):r\.reject\(Error\(t\.error\|\|`Failed to read current state`\)\)\)\}return\}/,
+    "$&if(t.type===`telegram-submit-bound-turn-result`){let n=globalThis.__codexTelegramSubmitBoundTurnRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve(t.conversationId??null):r.reject(Error(t.error||`Failed to submit the bound turn`)))}return}",
+    "main bound-turn ipc handler"
+  );
+}
+
 const bootstrapReplacement = `try{
 let t=process.env.CODEX_PORTABLE_USER_DATA_DIR||m.app.getPath('userData')||(0,p.join)(process.env.LOCALAPPDATA||m.app.getPath('appData'),'CodexPortableData'),
 n=async r=>{if(!r)return;let i=await Y9('local');i&&(i.isMinimized()&&i.restore(),i.show(),i.focus(),$9(i,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,750)));},
@@ -221,9 +236,10 @@ d=async({conversationId:r,serviceTier:i,source:a=\`telegram\`}={})=>{if(!r)throw
 f=async({conversationId:r=null,model:i=null,reasoningEffort:a=null}={})=>{let o=await Y9('local');if(!o)throw Error('Failed to open the Codex window');o.isMinimized()&&o.restore(),o.show(),o.focus(),r&&($9(o,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900)));let s=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,c=globalThis.__codexTelegramSetModelAndReasoningRequests||(globalThis.__codexTelegramSetModelAndReasoningRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply model and reasoning'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(o,{type:\`telegram-set-model-and-reasoning\`,requestId:s,conversationId:r??null,model:i,reasoningEffort:a});return await l},
 g=async({conversationId:r=null,permissionMode:i=null}={})=>{let o=await Y9('local');if(!o)throw Error('Failed to open the Codex window');o.isMinimized()&&o.restore(),o.show(),o.focus(),r&&($9(o,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900)));let s=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,c=globalThis.__codexTelegramSetPermissionModeRequests||(globalThis.__codexTelegramSetPermissionModeRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply permission mode'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(o,{type:\`telegram-set-permission-mode\`,requestId:s,conversationId:r??null,permissionMode:i});return await l},
 h=async({conversationId:r=null,reason:i=\`telegram_current\`}={})=>{let o=await Y9('local');if(!o)throw Error('Failed to open the Codex window');o.isMinimized()&&o.restore(),o.show(),o.focus(),r&&($9(o,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900)));let s=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,c=globalThis.__codexTelegramGetCurrentStateRequests||(globalThis.__codexTelegramGetCurrentStateRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex current state'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(o,{type:\`telegram-get-current-state\`,requestId:s,conversationId:r??null,reason:i});return await l},
+i=async({conversationId:r,input:i=[],attachments:a=[],cwd:o=null,workspaceRoots:s=[],settings:c=null}={})=>{if(!r)throw Error('Missing conversationId for telegram bound turn');let l=await Y9('local');if(!l)throw Error('Failed to open the Codex window');l.isMinimized()&&l.restore(),l.show(),l.focus(),$9(l,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900));let u=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,d=globalThis.__codexTelegramSubmitBoundTurnRequests||(globalThis.__codexTelegramSubmitBoundTurnRequests=new Map),f=new Promise((e,t)=>{let n=setTimeout(()=>{d.delete(u),t(Error('Timed out waiting for Codex to submit the bound turn'))},15e3);d.set(u,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(l,{type:\`telegram-submit-bound-turn\`,requestId:u,hostId:\`local\`,conversationId:r,input:Array.isArray(i)?i:[],attachments:Array.isArray(a)?a:[],cwd:typeof o=='string'&&o.trim().length>0?o:null,workspaceRoots:Array.isArray(s)?s.filter(e=>typeof e=='string'&&e.trim().length>0):[],settings:c});return await f},
 l=require('./telegram-native.js');
 typeof l.stopNativeTelegramBridge=='function'&&m.app.once('before-quit',()=>{l.stopNativeTelegramBridge().catch(e=>console.error('[telegram-native-stop]',e))}),
-l.startNativeTelegramBridge({userDataPath:t,ensureSessionOpen:n,openNewThread:o,startNewThreadTurn:s,setDefaultServiceTier:c,setThreadServiceTier:d,setModelAndReasoning:f,setPermissionMode:g,getCurrentAppState:h}).catch(e=>console.error('[telegram-native]',e));
+l.startNativeTelegramBridge({userDataPath:t,ensureSessionOpen:n,openNewThread:o,startNewThreadTurn:s,setDefaultServiceTier:c,setThreadServiceTier:d,setModelAndReasoning:f,setPermissionMode:g,getCurrentAppState:h,submitBoundThreadTurn:i}).catch(e=>console.error('[telegram-native]',e));
 }catch(e){console.error('[telegram-native-load]',e);}`;
 const existingBootstrapPattern = /try\{let [^;]+?require\('\.\/telegram-native\.js'\)[\s\S]*?console\.error\('\[telegram-native-load\]',e\);\}/;
 if (existingBootstrapPattern.test(main)) {
@@ -243,6 +259,7 @@ renderer = injectTelegramSetServiceTierCase(renderer, rendererFileName);
 renderer = injectTelegramSetModelAndReasoningCase(renderer, rendererFileName);
 renderer = injectTelegramSetPermissionModeCase(renderer, rendererFileName);
 renderer = injectTelegramGetCurrentStateCase(renderer, rendererFileName);
+renderer = injectTelegramSubmitBoundTurnCase(renderer, rendererFileName);
 
 if (!renderer.includes("globalThis.__codexTelegramConversationStarter=")) {
   renderer = replaceRegexOnce(

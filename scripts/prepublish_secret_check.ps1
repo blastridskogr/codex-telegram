@@ -1,8 +1,27 @@
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $include = @('*.md', '*.json', '*.ps1', '*.mjs', '*.js', '.gitignore')
+$localOnlyPatterns = @(
+  'telegram-native.json',
+  'chat_bindings.json',
+  'chat_settings.json',
+  'tasks/*',
+  'FILE_MAP.md',
+  'HANDOFF.md',
+  'HANDOFF_DETAILED.md',
+  'PROJECT_CONTEXT.md',
+  'work/*',
+  'state/*',
+  'logs/*',
+  'telegram-inbox/*',
+  'portable_userdata/*'
+)
 
 Push-Location $repoRoot
 try {
+  $trackedRelativeFiles = git ls-files --cached
+  if ($LASTEXITCODE -ne 0) {
+    throw 'git ls-files --cached failed.'
+  }
   $relativeFiles = git ls-files --cached --others --exclude-standard
   if ($LASTEXITCODE -ne 0) {
     throw 'git ls-files failed.'
@@ -30,6 +49,15 @@ $files = foreach ($relativePath in $relativeFiles) {
 }
 
 $problems = @()
+
+foreach ($relativePath in $trackedRelativeFiles) {
+  foreach ($pattern in $localOnlyPatterns) {
+    if ($relativePath -like $pattern) {
+      $problems += "Tracked local-only path: $relativePath"
+      break
+    }
+  }
+}
 
 foreach ($file in $files) {
   $text = Get-Content $file.FullName -Raw
