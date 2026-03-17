@@ -1,16 +1,32 @@
 # codex-telegram
 
-Telegram control surface for the **official Codex Desktop app on Windows**, patched and re-registered locally.
+Unofficial Telegram workflow for the Windows Codex app I actually use: sign into Codex first, then patch and re-register a local copy so Telegram drives that same app session.
 
 [Features](docs/FEATURES.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
-This repository contains the patch source, workflow scripts, and setup docs for Telegram patching and local re-registration of your own Microsoft Store Codex app. It does **not** include OpenAI binaries, extracted bundles, rebuilt `app.asar`, or your runtime secrets.
+This repository contains the patch source, workflow scripts, and setup docs for the Telegram-driven Codex workflow I actually run on Windows. It does **not** include OpenAI binaries, extracted bundles, rebuilt `app.asar`, or your runtime secrets.
 
 ## Disclaimer
 
 - Unofficial project. It is **not** affiliated with, endorsed by, or published by OpenAI.
 - This repository documents a local patch and re-registration workflow. It does **not** redistribute Codex binaries or patched app bundles.
 - You are responsible for reviewing the current OpenAI terms and your local legal/compliance requirements before using, modifying, or publishing anything based on this workflow.
+
+## How I use it
+
+This repository is built around the way I actually use Codex:
+
+- install the official Microsoft Store Codex app
+- sign into that app with the same ChatGPT account I normally use in Codex
+- if I want the same behavior as my daily setup, that means signing into the app with my ChatGPT Pro account first
+- confirm the official app works on its own before patching anything
+- patch and re-register a local copy of that official app so Telegram can drive the same app session
+
+The important boundary is:
+
+- Telegram does **not** replace Codex auth with a separate backend
+- Telegram drives the same locally running Codex app
+- that app still uses its own signed-in account, plan limits, and conversation state
 
 ## Current workflow
 
@@ -28,7 +44,7 @@ Verified baseline on 2026-03-17:
 
 - Windows 11
 - Microsoft Store Codex source package `26.313.5234.0`
-- Telegram-patched registered package `26.313.5234.1`
+- Telegram-patched registered package `26.313.5234.4`
 - Node.js 24+
 - PowerShell 5.1+
 
@@ -48,19 +64,23 @@ Copy-Item .\examples\telegram-native.example.json "$env:APPDATA\\Codex\\telegram
 npm install
 ```
 
-4. Prepare the patched official-app workspace from the currently installed Microsoft Store package:
+4. Sign into the official Codex app first and make sure a normal Codex chat works.
+
+If you want the same setup described in this repo, sign into the official app with your ChatGPT Pro account before patching.
+
+5. Prepare the patched official-app workspace from the currently installed Microsoft Store package:
 
 ```powershell
 npm run official:update
 ```
 
-5. Replace the live app with the freshly prepared local package:
+6. Replace the live app with the freshly prepared local package:
 
 ```powershell
 npm run official:redeploy
 ```
 
-6. If the Microsoft Store update path is blocked by the currently registered local package, run the full recovery flow instead:
+7. If the Microsoft Store update path is blocked by the currently registered local package, run the full recovery flow instead:
 
 ```powershell
 npm run official:recover-store
@@ -94,6 +114,8 @@ Portable-specific helpers still exist in `scripts/` as archived reference. The s
 - mirrored assistant responses preserve common Markdown formatting in Telegram
 - mirrored user/app echo stays plain text on purpose
 - Telegram images are still downgraded to **text + attachment** before injection for payload safety
+
+That means the Telegram side is using the same signed-in Codex app you already use, not a separate Codex account path.
 
 Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 

@@ -1,13 +1,31 @@
 # Windows official app setup
 
-This repository does not redistribute Codex binaries. It patches a **local copy** of your own Microsoft Store Codex installation, then re-registers that local copy under the same `OpenAI.Codex` package identity for the current user.
+This repository does not redistribute Codex binaries. It documents the way I actually use Codex on Windows: sign into the Codex app first, then patch and re-register a **local copy** so Telegram can drive that same signed-in app session.
+
+That means the working pattern is:
+
+- use the official Windows Codex app first
+- sign into that app with the same ChatGPT account I normally use
+- if I want the same setup as this repo, I sign into the app with my ChatGPT Pro account first
+- then patch a local copy so Telegram can drive that same app session
 
 ## Requirements
 
 - Windows 11
 - Codex Desktop installed from the Microsoft Store
+- a working sign-in in the official Codex app before patching
 - Node.js 24+
 - PowerShell 5.1+
+
+## 0. Sign into the official app first
+
+Before patching anything:
+
+- launch the Microsoft Store Codex app once
+- sign in
+- confirm a normal Codex chat works in the app
+
+If you want the same setup described in this repository, sign into the official app with your ChatGPT Pro account before continuing.
 
 ## 1. Install repository dependencies
 
@@ -118,6 +136,12 @@ Healthy startup should include fresh lines similar to:
 - `resolvedConfigPath=...telegram-native.json exists=true`
 - `broadcast monitor connected pipe=\\.\pipe\codex-ipc`
 - `polling started allowlist=...`
+
+## Account and plan behavior
+
+- Telegram does **not** create a separate Codex backend or separate account session
+- the patched local package still uses the same signed-in Codex app account
+- if you signed into the official app with ChatGPT Pro before patching, Telegram-driven usage is flowing through that same signed-in app path
 
 ## 7. Pre-publish check
 

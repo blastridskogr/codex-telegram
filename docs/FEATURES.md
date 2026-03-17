@@ -1,8 +1,8 @@
 # Features
 
-This project turns the official Codex Desktop app, patched and re-registered locally, into a Telegram-controlled Codex surface on Windows.
+This project documents the Telegram-driven Codex workflow I actually use on Windows: use the Codex app normally first, then patch and re-register a local copy so Telegram can control that same app session.
 
-It does **not** replace Codex with a separate bot backend. Telegram drives the same patched desktop app process and the same Codex conversations.
+It does **not** replace Codex with a separate bot backend. Telegram drives the same patched desktop app process, the same Codex conversations, and the same signed-in app account path.
 
 ## App-native control surface
 
@@ -36,6 +36,13 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 - Re-register the local package copy under the same `OpenAI.Codex` identity and launch it.
 - If a Microsoft Store update is blocked by the local dev registration, run the recovery flow that reinstalls the official Store package first and then reapplies the Telegram patch.
 
+## Account behavior
+
+- This workflow assumes you already use the official Codex app normally.
+- Sign into the official app first, then patch the local copy.
+- If you use Codex with a ChatGPT Pro account in the official app, the Telegram-driven path continues through that same signed-in app session.
+- Telegram is a control surface for that app session, not a replacement auth path.
+
 See [WINDOWS_OFFICIAL_APP_SETUP.md](WINDOWS_OFFICIAL_APP_SETUP.md) for the full setup flow.
 
 ## Safety model
@@ -48,7 +55,7 @@ See [SECURITY.md](SECURITY.md) for publish rules and token-handling guidance.
 
 ## Current limits
 
-- Verified against the 2026-03-17 Microsoft Store source package `26.313.5234.0`, re-registered locally as package `26.313.5234.1`.
+- Verified against the 2026-03-17 Microsoft Store source package `26.313.5234.0`, re-registered locally as package `26.313.5234.4`.
 - The patcher depends on the current minified renderer and main bundle anchors.
 - If OpenAI changes the bundle shape, the patch scripts may need updates.
 - The live replace step intentionally stops the running Codex app and re-registers the local package copy.
