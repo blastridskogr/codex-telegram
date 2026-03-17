@@ -1,12 +1,12 @@
 # Windows official app setup
 
-This repository does not redistribute Codex binaries. It documents the way I actually use Codex on Windows: sign into the Codex app first, then patch and re-register a **local copy** so Telegram can drive that same signed-in app session.
+This repository does not redistribute Codex binaries. It documents the way I actually use Codex on Windows: keep Codex on the same official ChatGPT Pro account I use on the web, use the Codex app to instruct that same Pro account and receive results back, then patch and re-register a **local copy** so Telegram can drive that same signed-in app session.
 
 That means the working pattern is:
 
 - use the official Windows Codex app first
-- sign into that app with the same ChatGPT account I normally use
-- if I want the same setup as this repo, I sign into the app with my ChatGPT Pro account first
+- sign into that app with the same official ChatGPT Pro account I normally use on chatgpt.com
+- use the app as a surface for instructing that same official web-side Pro account and receiving results back through it
 - then patch a local copy so Telegram can drive that same app session
 
 ## Requirements
@@ -25,7 +25,7 @@ Before patching anything:
 - sign in
 - confirm a normal Codex chat works in the app
 
-If you want the same setup described in this repository, sign into the official app with your ChatGPT Pro account before continuing.
+If you want the same setup described in this repository, sign into the official app with the same official ChatGPT Pro account you use on the web before continuing.
 
 ## 1. Install repository dependencies
 
@@ -141,7 +141,9 @@ Healthy startup should include fresh lines similar to:
 
 - Telegram does **not** create a separate Codex backend or separate account session
 - the patched local package still uses the same signed-in Codex app account
-- if you signed into the official app with ChatGPT Pro before patching, Telegram-driven usage is flowing through that same signed-in app path
+- in the workflow documented here, that means the same official ChatGPT Pro account used on the web
+- the Codex app is the surface used to instruct that same official web-side Pro account and receive results back
+- Telegram-driven usage is flowing through that same signed-in app path, not a different Telegram-only entitlement path
 
 ## 7. Pre-publish check
 

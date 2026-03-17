@@ -2,7 +2,7 @@
   "name": "codex-telegram",
   "private": true,
   "version": "0.1.0",
-  "description": "Unofficial Telegram workflow for the Windows Codex app I actually use: sign in first, then patch a local copy so Telegram drives the same app session.",
+  "description": "Unofficial Telegram workflow for the Windows Codex app I actually use with my official ChatGPT Pro account: the app instructs that same web-side Pro account and gets results back, then Telegram drives the same session.",
   "scripts": {
     "official:update": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\run_official_telegram_update.ps1 -WorkspaceRoot .\\work\\official_app_update",
     "official:redeploy": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\redeploy_updated_official_telegram.ps1 -WorkspaceRoot .\\work\\official_app_update",
