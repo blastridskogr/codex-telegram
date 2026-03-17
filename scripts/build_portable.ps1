@@ -63,7 +63,7 @@ try {
   }
 
   Invoke-Step 'Inject the native Telegram runtime into the extracted bundle' {
-    Invoke-External 'node.exe' @('.\scripts\inject_native_telegram.mjs')
+    Invoke-External 'node.exe' @('.\scripts\inject_native_telegram.mjs', '--extract-dir', '.\work\full_extract', '--mutate-identity')
   }
 
   Invoke-Step 'Verify injected main.js syntax' {
@@ -82,7 +82,15 @@ try {
   }
 
   Invoke-Step 'Rewrite the Electron integrity metadata in Codex.exe' {
-    Invoke-External 'node.exe' @('.\scripts\update_portable_asar_integrity.mjs')
+    Invoke-External 'node.exe' @(
+      '.\scripts\update_asar_integrity.mjs',
+      '--exe-path',
+      '.\work\portable_package_root\app\Codex.exe',
+      '--asar-path',
+      '.\work\portable_package_root\app\resources\app.asar',
+      '--relative-asar-path',
+      'resources\app.asar'
+    )
   }
 
   if ($Register) {

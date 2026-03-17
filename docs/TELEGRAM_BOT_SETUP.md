@@ -23,7 +23,7 @@ Useful BotFather commands:
 
 If you plan to use the bot only in a private chat, no group-specific setting is required.
 
-The portable runtime syncs the bot command list itself when it starts. You do not need to manually keep BotFather commands in sync after every code change.
+The injected Telegram runtime syncs the bot command list itself when it starts. You do not need to manually keep BotFather commands in sync after every code change.
 
 ## 3. Get your chat id
 
@@ -44,7 +44,7 @@ Private chat ids are usually a plain positive integer.
 Create:
 
 ```text
-%LOCALAPPDATA%\\CodexPortableData\\telegram-native.json
+%APPDATA%\Codex\telegram-native.json
 ```
 
 Start from [examples/telegram-native.example.json](../examples/telegram-native.example.json).
@@ -62,8 +62,9 @@ Never commit:
 - `telegram-native.json`
 - `chat_bindings.json`
 - `chat_settings.json`
-- `telegram-inbox/`
-- `logs/`
+- `telegram-native-inbox/`
+- `telegram-native-state/`
+- `work/`
 
 This repository's `.gitignore` already blocks those paths. Keep it that way.
 

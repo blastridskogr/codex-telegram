@@ -2,12 +2,14 @@
   "name": "codex-telegram",
   "private": true,
   "version": "0.1.0",
-  "description": "Patch scripts and docs for running a Telegram-controlled portable Codex app on Windows.",
+  "description": "Patch scripts and docs for Telegram patching and re-registration of the official Windows Codex app.",
   "scripts": {
-    "build:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\build_portable.ps1",
+    "official:update": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\run_official_telegram_update.ps1 -WorkspaceRoot .\\work\\official_app_update",
+    "official:redeploy": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\redeploy_updated_official_telegram.ps1 -WorkspaceRoot .\\work\\official_app_update",
+    "official:recover-store": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\recover_official_store_then_repatch.ps1 -WorkspaceRoot .\\work\\official_app_update",
     "patch:inject": "node scripts/inject_native_telegram.mjs",
     "patch:rebuild": "node scripts/rebuild_patched_asar.mjs",
-    "patch:integrity": "node scripts/update_portable_asar_integrity.mjs"
+    "patch:integrity": "node scripts/update_asar_integrity.mjs"
   },
   "dependencies": {
     "@electron/asar": "^4.1.0",

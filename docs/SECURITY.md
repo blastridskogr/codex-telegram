@@ -4,7 +4,7 @@
 
 - This is an unofficial workflow repository, not an OpenAI distribution channel.
 - Keep the repository limited to your own patch source, scripts, and documentation.
-- Do not publish OpenAI binaries, extracted proprietary bundles, or rebuilt portable outputs.
+- Do not publish OpenAI binaries, extracted proprietary bundles, rebuilt `app.asar` files, or registered deploy roots.
 - Before using or publishing the workflow, review the current OpenAI terms yourself and make your own compliance decision.
 
 ## Publishable vs local-only
@@ -22,14 +22,16 @@ Publishable:
 
 Local-only:
 
-- `telegram-native.json`
-- `chat_bindings.json`
-- `chat_settings.json`
+- `%APPDATA%\Codex\telegram-native.json`
+- `%APPDATA%\Codex\telegram-native.log`
+- `%APPDATA%\Codex\telegram-native-state\`
+- `%APPDATA%\Codex\telegram-native-inbox\`
 - `tasks/`
 - `FILE_MAP.md`
 - `HANDOFF.md`
 - `HANDOFF_DETAILED.md`
 - `PROJECT_CONTEXT.md`
+- `OFFICIAL_APP_AGENT_RUNBOOK.md`
 - `work/`
 - repo-local logs, inbox dumps, and verification artifacts
 
@@ -39,6 +41,8 @@ Local-only:
 - personal `chat_id`
 - your Windows username
 - absolute user-profile paths
+- extracted official package roots
+- staged or registered `package_root_telegram_registered_v*` directories
 - screenshots that expose the token or your private chat id
 
 ## Before every commit or push

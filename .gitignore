@@ -4,6 +4,8 @@ work/
 state/
 logs/
 telegram-inbox/
+telegram-native-inbox/
+telegram-native-state/
 portable_userdata/
 *.log
 *.asar
@@ -23,3 +25,4 @@ FILE_MAP.md
 HANDOFF.md
 HANDOFF_DETAILED.md
 PROJECT_CONTEXT.md
+OFFICIAL_APP_AGENT_RUNBOOK.md

@@ -6,12 +6,66 @@ import { getRawHeader } from "@electron/asar";
 import { NtExecutable, NtExecutableResource, Resource } from "resedit";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const exePath = path.join(repoRoot, "work", "portable_package_root", "app", "Codex.exe");
-const asarPath = path.join(repoRoot, "work", "portable_package_root", "app", "resources", "app.asar");
-const relativeAsarPath = "resources\\app.asar";
+function parseArgs(argv) {
+  let exePath = null;
+  let asarPath = null;
+  let relativeAsarPath = "resources\\app.asar";
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === "--exe-path") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("Missing value for --exe-path");
+      }
+      exePath = path.resolve(repoRoot, value);
+      index += 1;
+      continue;
+    }
+    if (token === "--asar-path") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("Missing value for --asar-path");
+      }
+      asarPath = path.resolve(repoRoot, value);
+      index += 1;
+      continue;
+    }
+    if (token === "--relative-asar-path") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("Missing value for --relative-asar-path");
+      }
+      relativeAsarPath = value;
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${token}`);
+  }
+
+  if (!exePath || !asarPath) {
+    throw new Error("Pass both --exe-path and --asar-path");
+  }
+
+  return { exePath, asarPath, relativeAsarPath };
+}
+
+function normalizeRelativeAsarPath(value) {
+  return String(value)
+    .trim()
+    .replace(/^[.][\\/]+/, "")
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .join("\\");
+}
+
+const options = parseArgs(process.argv.slice(2));
+const exePath = options.exePath;
+const asarPath = options.asarPath;
+const relativeAsarPath = normalizeRelativeAsarPath(options.relativeAsarPath);
 
 if (!fs.existsSync(exePath)) {
-  throw new Error(`Portable executable not found: ${exePath}`);
+  throw new Error(`Executable not found: ${exePath}`);
 }
 if (!fs.existsSync(asarPath)) {
   throw new Error(`Patched app.asar not found: ${asarPath}`);
@@ -33,10 +87,10 @@ if (languages.length !== 1) {
   throw new Error("Failed to locate language metadata for integrity resource");
 }
 
-for (let i = res.entries.length - 1; i >= 0; i -= 1) {
-  const entry = res.entries[i];
+for (let index = res.entries.length - 1; index >= 0; index -= 1) {
+  const entry = res.entries[index];
   if (String(entry.type) === "INTEGRITY" || String(entry.id) === "ELECTRONASAR") {
-    res.entries.splice(i, 1);
+    res.entries.splice(index, 1);
   }
 }
 

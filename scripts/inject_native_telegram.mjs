@@ -3,12 +3,32 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const extractDir = path.join(repoRoot, "work", "full_extract");
-const buildDir = path.join(extractDir, ".vite", "build");
-const mainPath = path.join(buildDir, "main.js");
-const rendererAssetsDir = path.join(extractDir, "webview", "assets");
 const telegramSource = path.join(repoRoot, "patch", "telegram-native.js");
-const telegramDest = path.join(buildDir, "telegram-native.js");
+
+function parseArgs(argv) {
+  let extractDir = path.join(repoRoot, "work", "full_extract");
+  let mutateIdentity = false;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === "--extract-dir") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("Missing value for --extract-dir");
+      }
+      extractDir = path.resolve(repoRoot, value);
+      index += 1;
+      continue;
+    }
+    if (token === "--mutate-identity") {
+      mutateIdentity = true;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${token}`);
+  }
+
+  return { extractDir, mutateIdentity };
+}
 
 function replaceOnce(source, search, replacement, label) {
   if (!source.includes(search)) {
@@ -47,7 +67,7 @@ function listRendererAssets(directory) {
     .map((entry) => path.join(directory, entry.name));
 }
 
-function discoverRendererTarget() {
+function discoverRendererTarget(rendererAssetsDir) {
   const files = listRendererAssets(rendererAssetsDir);
   const scored = files.map((filePath) => {
     const source = fs.readFileSync(filePath, "utf8");
@@ -82,6 +102,71 @@ function discoverRendererTarget() {
   }
 
   return candidates[0];
+}
+
+function resolveMainBundlePaths(extractDir) {
+  const packageJsonPath = path.join(extractDir, "package.json");
+  if (!fs.existsSync(packageJsonPath)) {
+    throw new Error(`Extracted package.json not found: ${packageJsonPath}`);
+  }
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  if (typeof packageJson.main !== "string" || packageJson.main.trim().length === 0) {
+    throw new Error(`package.json is missing a usable main field: ${packageJsonPath}`);
+  }
+
+  const bootstrapPath = path.resolve(extractDir, packageJson.main);
+  if (!fs.existsSync(bootstrapPath)) {
+    throw new Error(`Extracted bootstrap entry not found: ${bootstrapPath}`);
+  }
+
+  let mainPath = bootstrapPath;
+  const visited = new Set();
+  const nextBundlePatterns = [
+    /require\(`\.\/(main-[^`]+\.js)`\)/,
+    /require\('\.\/(main-[^']+\.js)'\)/,
+    /require\("\.\/(main-[^"]+\.js)"\)/,
+    /require\(`\.\/(bootstrap-[^`]+\.js)`\)/,
+    /require\('\.\/(bootstrap-[^']+\.js)'\)/,
+    /require\("\.\/(bootstrap-[^"]+\.js)"\)/,
+  ];
+
+  while (true) {
+    const normalizedPath = path.normalize(mainPath);
+    if (visited.has(normalizedPath)) {
+      throw new Error(`Detected a cyclic bootstrap chain while resolving the main bundle: ${mainPath}`);
+    }
+    visited.add(normalizedPath);
+
+    const currentSource = fs.readFileSync(mainPath, "utf8");
+    if (
+      currentSource.includes("exports.runMainAppStartup=")
+      || currentSource.includes("codex_desktop:message-from-view")
+    ) {
+      break;
+    }
+    const nextMatch = nextBundlePatterns
+      .map((pattern) => currentSource.match(pattern))
+      .find(Boolean);
+
+    if (!nextMatch) {
+      break;
+    }
+
+    const nextPath = path.join(path.dirname(mainPath), nextMatch[1]);
+    if (!fs.existsSync(nextPath)) {
+      throw new Error(`Resolved hashed bundle not found: ${nextPath}`);
+    }
+
+    mainPath = nextPath;
+  }
+
+  return {
+    packageJsonPath,
+    bootstrapPath,
+    mainPath,
+    buildDir: path.dirname(bootstrapPath),
+  };
 }
 
 function upsertRendererCase(source, caseName, caseSource, rendererFileName) {
@@ -135,170 +220,231 @@ function injectTelegramGetCurrentStateCase(source, rendererFileName) {
 
 function injectTelegramSubmitBoundTurnCase(source, rendererFileName) {
   const caseSource =
-    "case`telegram-submit-bound-turn`:{try{let n=i.getForHostIdOrThrowWhenDefaultHost(e.hostId??null);if(n==null)throw Error(`Conversation manager unavailable for host ${e.hostId??`local`}`);let r=e.conversationId??null,o=Array.isArray(e.input)?e.input:[],s=Array.isArray(e.attachments)?e.attachments:[];if(!r)throw Error(`Missing conversationId for telegram-submit-bound-turn`);if(o.length===0)throw Error(`Missing input for telegram-submit-bound-turn`);let c=null;for(let l=0;l<16;l++){if(c=n.getConversation(r),c)break;await new Promise(e=>setTimeout(e,250))}if(!c)throw Error(`Conversation ${r} is unavailable in the renderer`);let l=c.turns[c.turns.length-1]??null,u=We([]),d=typeof e.cwd==`string`&&e.cwd.trim().length>0?e.cwd:c.cwd??null,f=e.settings??null;await yn(n,r,{input:o,cwd:d,approvalPolicy:e.approvalPolicy??l?.params?.approvalPolicy??u.approvalPolicy,sandboxPolicy:e.sandboxPolicy??l?.params?.sandboxPolicy??u.sandboxPolicy,model:e.model??f?.model??null,effort:e.effort??f?.effort??null,attachments:s,collaborationMode:e.collaborationMode??l?.params?.collaborationMode??c.latestCollaborationMode??null}),Tr.dispatchMessage(`telegram-submit-bound-turn-result`,{requestId:e.requestId,ok:!0,conversationId:r})}catch(n){Er.error(`telegram_submit_bound_turn_failed`,{safe:{requestId:e.requestId??null,conversationId:e.conversationId??null},sensitive:{error:n}}),Tr.dispatchMessage(`telegram-submit-bound-turn-result`,{requestId:e.requestId,ok:!1,error:n instanceof Error?n.message:String(n)})}break bb3}";
+    "case`telegram-submit-bound-turn`:{try{let n=i.getForHostIdOrThrowWhenDefaultHost(e.hostId??null);if(n==null)throw Error(`Conversation manager unavailable for host ${e.hostId??`local`}`);let r=e.conversationId??null,o=Array.isArray(e.input)?e.input:[],s=Array.isArray(e.attachments)?e.attachments:[];if(!r)throw Error(`Missing conversationId for telegram-submit-bound-turn`);if(o.length===0)throw Error(`Missing input for telegram-submit-bound-turn`);let c=null;for(let l=0;l<16;l++){if(c=n.getConversation(r),c)break;await new Promise(e=>setTimeout(e,250))}if(!c)throw Error(`Conversation ${r} is unavailable in the renderer`);let l=c.turns[c.turns.length-1]??null,u=typeof e.cwd==`string`&&e.cwd.trim().length>0?e.cwd:c.cwd??null,d=e.settings??null,f={conversationId:r,turnStartParams:{input:o,cwd:u,approvalPolicy:e.approvalPolicy??l?.params?.approvalPolicy??null,sandboxPolicy:e.sandboxPolicy??l?.params?.sandboxPolicy??null,model:e.model??d?.model??l?.params?.model??null,serviceTier:e.serviceTier??d?.serviceTier??l?.params?.serviceTier??null,effort:e.effort??d?.effort??l?.params?.effort??null,outputSchema:null,collaborationMode:e.collaborationMode??l?.params?.collaborationMode??c.latestCollaborationMode??null,attachments:s},isSteering:!1};await n.handleThreadFollowerStartTurn(f),Tr.dispatchMessage(`telegram-submit-bound-turn-result`,{requestId:e.requestId,ok:!0,conversationId:r})}catch(n){Er.error(`telegram_submit_bound_turn_failed`,{safe:{requestId:e.requestId??null,conversationId:e.conversationId??null},sensitive:{error:n}}),Tr.dispatchMessage(`telegram-submit-bound-turn-result`,{requestId:e.requestId,ok:!1,error:n instanceof Error?n.message:String(n)})}break bb3}";
   return upsertRendererCase(source, "telegram-submit-bound-turn", caseSource, rendererFileName);
 }
 
-if (!fs.existsSync(mainPath)) {
-  throw new Error(`Extracted main.js not found: ${mainPath}`);
-}
-if (!fs.existsSync(telegramSource)) {
-  throw new Error(`Patch source not found: ${telegramSource}`);
-}
+function injectTelegramBridge(targetExtractDir, { mutateIdentity = false } = {}) {
+  const extractDir = path.resolve(targetExtractDir);
+  const { buildDir, mainPath } = resolveMainBundlePaths(extractDir);
+  const rendererAssetsDir = path.join(extractDir, "webview", "assets");
+  const telegramDest = path.join(buildDir, "telegram-native.js");
 
-let main = fs.readFileSync(mainPath, "utf8");
-const rendererTarget = discoverRendererTarget();
-const rendererPath = rendererTarget.filePath;
-let renderer = rendererTarget.source;
+  if (!fs.existsSync(mainPath)) {
+    throw new Error(`Extracted main bundle not found: ${mainPath}`);
+  }
+  if (!fs.existsSync(telegramSource)) {
+    throw new Error(`Patch source not found: ${telegramSource}`);
+  }
 
-const setNamePattern = /m\.app\.setName\([^;]+?\),\w+\(\);|m\.app\.setName\(`Codex`\);|m\.app\.setName\("Codex"\);/;
-if (!setNamePattern.test(main)) {
-  throw new Error("Could not find the Codex app name assignment in main.js");
-}
-if (!main.includes("Codex Portable")) {
-  main = main.replace(setNamePattern, "m.app.setName(`Codex Portable`);ate();");
-}
+  let main = fs.readFileSync(mainPath, "utf8");
+  const rendererTarget = discoverRendererTarget(rendererAssetsDir);
+  const rendererPath = rendererTarget.filePath;
+  let renderer = rendererTarget.source;
 
-const appIdPattern = /m\.app\.setAppUserModelId\([^;]+?\)/;
-if (appIdPattern.test(main)) {
-  main = main.replace(appIdPattern, "(m.app.setAppUserModelId(`com.openai.codexportable`))");
-  main = main.replace(
-    /&&m\.app\.setAppUserModelId\(`com\.openai\.codexportable`\)\);/g,
-    "&&(m.app.setAppUserModelId(`com.openai.codexportable`));"
-  );
-  main = main.replace(
-    /&&\((m\.app\.setAppUserModelId\(`com\.openai\.codexportable`\))\)\);/g,
-    "&&($1);"
-  );
-}
+  if (!mutateIdentity && (main.includes("Codex Portable") || main.includes("com.openai.codexportable"))) {
+    throw new Error(`Refusing to run official-style injection on a portable-identity bundle: ${extractDir}`);
+  }
 
-if (!main.includes("telegram-start-conversation-result")) {
-  main = replaceRegexOnce(
-    main,
-    /m\.ipcMain\.handle\(`codex_desktop:message-from-view`,async\(e,t\)=>\{if\(!(\w+)\(e\)\)return;/,
-    "m.ipcMain.handle(`codex_desktop:message-from-view`,async(e,t)=>{if(!$1(e))return;if(t.type===`telegram-start-conversation-result`){let n=globalThis.__codexTelegramStartConversationRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve(t.conversationId):r.reject(Error(t.error||`Failed to create conversation`)))}return}",
-    "main ipc handler"
-  );
-}
+  if (mutateIdentity) {
+    const setNamePattern = /m\.app\.setName\([^;]+?\),\w+\(\);|m\.app\.setName\(`Codex`\);|m\.app\.setName\("Codex"\);/;
+    if (!setNamePattern.test(main) && !main.includes("Codex Portable")) {
+      throw new Error("Could not find the Codex app name assignment in the resolved main bundle");
+    }
+    if (!main.includes("Codex Portable")) {
+      main = main.replace(setNamePattern, "m.app.setName(`Codex Portable`);ate();");
+    }
 
-if (!main.includes("telegram-set-service-tier-result")) {
-  main = replaceRegexOnce(
-    main,
-    /if\(t\.type===`telegram-start-conversation-result`\)\{let n=globalThis\.__codexTelegramStartConversationRequests;if\(n\)\{let r=n\.get\(t\.requestId\);r&&\(n\.delete\(t\.requestId\),t\.ok\?r\.resolve\(t\.conversationId\):r\.reject\(Error\(t\.error\|\|`Failed to create conversation`\)\)\)\}return\}/,
-    "$&if(t.type===`telegram-set-service-tier-result`){let n=globalThis.__codexTelegramSetServiceTierRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve(t.conversationId??null):r.reject(Error(t.error||`Failed to set service tier`)))}return}",
-    "main service tier ipc handler"
-  );
-}
+    const appIdPattern = /m\.app\.setAppUserModelId\([^;]+?\)/;
+    if (appIdPattern.test(main)) {
+      main = main.replace(appIdPattern, "(m.app.setAppUserModelId(`com.openai.codexportable`))");
+      main = main.replace(
+        /&&m\.app\.setAppUserModelId\(`com\.openai\.codexportable`\)\);/g,
+        "&&(m.app.setAppUserModelId(`com.openai.codexportable`));"
+      );
+      main = main.replace(
+        /&&\((m\.app\.setAppUserModelId\(`com\.openai\.codexportable`\))\)\);/g,
+        "&&($1);"
+      );
+    } else if (!main.includes("com.openai.codexportable")) {
+      throw new Error("Could not find the Codex app id assignment in the resolved main bundle");
+    }
+  }
 
-if (!main.includes("telegram-set-model-and-reasoning-result")) {
-  main = replaceRegexOnce(
-    main,
-    /if\(t\.type===`telegram-set-service-tier-result`\)\{let n=globalThis\.__codexTelegramSetServiceTierRequests;if\(n\)\{let r=n\.get\(t\.requestId\);r&&\(n\.delete\(t\.requestId\),t\.ok\?r\.resolve\(t\.conversationId\?\?null\):r\.reject\(Error\(t\.error\|\|`Failed to set service tier`\)\)\)\}return\}/,
-    "$&if(t.type===`telegram-set-model-and-reasoning-result`){let n=globalThis.__codexTelegramSetModelAndReasoningRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve({conversationId:t.conversationId??null,model:t.model??null,reasoningEffort:t.reasoningEffort??null}):r.reject(Error(t.error||`Failed to set model and reasoning`)))}return}",
-    "main model/reasoning ipc handler"
-  );
-}
-
-if (!main.includes("telegram-set-permission-mode-result")) {
-  main = replaceRegexOnce(
-    main,
-    /if\(t\.type===`telegram-set-model-and-reasoning-result`\)\{let n=globalThis\.__codexTelegramSetModelAndReasoningRequests;if\(n\)\{let r=n\.get\(t\.requestId\);r&&\(n\.delete\(t\.requestId\),t\.ok\?r\.resolve\(\{conversationId:t\.conversationId\?\?null,model:t\.model\?\?null,reasoningEffort:t\.reasoningEffort\?\?null\}\):r\.reject\(Error\(t\.error\|\|`Failed to set model and reasoning`\)\)\)\}return\}/,
-    "$&if(t.type===`telegram-set-permission-mode-result`){let n=globalThis.__codexTelegramSetPermissionModeRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve({conversationId:t.conversationId??null,permissionMode:t.permissionMode??null}):r.reject(Error(t.error||`Failed to set permission mode`)))}return}",
-    "main permission ipc handler"
-  );
-}
-
-if (!main.includes("telegram-get-current-state-result")) {
-  main = replaceRegexOnce(
-    main,
-    /if\(t\.type===`telegram-set-permission-mode-result`\)\{let n=globalThis\.__codexTelegramSetPermissionModeRequests;if\(n\)\{let r=n\.get\(t\.requestId\);r&&\(n\.delete\(t\.requestId\),t\.ok\?r\.resolve\(\{conversationId:t\.conversationId\?\?null,permissionMode:t\.permissionMode\?\?null\}\):r\.reject\(Error\(t\.error\|\|`Failed to set permission mode`\)\)\)\}return\}/,
-    "$&if(t.type===`telegram-get-current-state-result`){let n=globalThis.__codexTelegramGetCurrentStateRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve(t.state??null):r.reject(Error(t.error||`Failed to read current state`)))}return}",
-    "main current-state ipc handler"
-  );
-}
-
-if (!main.includes("telegram-submit-bound-turn-result")) {
-  main = replaceRegexOnce(
-    main,
-    /if\(t\.type===`telegram-get-current-state-result`\)\{let n=globalThis\.__codexTelegramGetCurrentStateRequests;if\(n\)\{let r=n\.get\(t\.requestId\);r&&\(n\.delete\(t\.requestId\),t\.ok\?r\.resolve\(t\.state\?\?null\):r\.reject\(Error\(t\.error\|\|`Failed to read current state`\)\)\)\}return\}/,
-    "$&if(t.type===`telegram-submit-bound-turn-result`){let n=globalThis.__codexTelegramSubmitBoundTurnRequests;if(n){let r=n.get(t.requestId);r&&(n.delete(t.requestId),t.ok?r.resolve(t.conversationId??null):r.reject(Error(t.error||`Failed to submit the bound turn`)))}return}",
-    "main bound-turn ipc handler"
-  );
-}
+  if (!main.includes("telegram-submit-bound-turn-result")) {
+    const mainIpcTelegramResultHandlers =
+      "if($2.type===`telegram-start-conversation-result`){let n=globalThis.__codexTelegramStartConversationRequests;if(n){let r=n.get($2.requestId);r&&(n.delete($2.requestId),$2.ok?r.resolve($2.conversationId):r.reject(Error($2.error||`Failed to create conversation`)))}return}if($2.type===`telegram-set-service-tier-result`){let n=globalThis.__codexTelegramSetServiceTierRequests;if(n){let r=n.get($2.requestId);r&&(n.delete($2.requestId),$2.ok?r.resolve($2.conversationId??null):r.reject(Error($2.error||`Failed to set service tier`)))}return}if($2.type===`telegram-set-model-and-reasoning-result`){let n=globalThis.__codexTelegramSetModelAndReasoningRequests;if(n){let r=n.get($2.requestId);r&&(n.delete($2.requestId),$2.ok?r.resolve({conversationId:$2.conversationId??null,model:$2.model??null,reasoningEffort:$2.reasoningEffort??null}):r.reject(Error($2.error||`Failed to set model and reasoning`)))}return}if($2.type===`telegram-set-permission-mode-result`){let n=globalThis.__codexTelegramSetPermissionModeRequests;if(n){let r=n.get($2.requestId);r&&(n.delete($2.requestId),$2.ok?r.resolve({conversationId:$2.conversationId??null,permissionMode:$2.permissionMode??null}):r.reject(Error($2.error||`Failed to set permission mode`)))}return}if($2.type===`telegram-get-current-state-result`){let n=globalThis.__codexTelegramGetCurrentStateRequests;if(n){let r=n.get($2.requestId);r&&(n.delete($2.requestId),$2.ok?r.resolve($2.state??null):r.reject(Error($2.error||`Failed to read current state`)))}return}if($2.type===`telegram-submit-bound-turn-result`){let n=globalThis.__codexTelegramSubmitBoundTurnRequests;if(n){let r=n.get($2.requestId);r&&(n.delete($2.requestId),$2.ok?r.resolve($2.conversationId??null):r.reject(Error($2.error||`Failed to submit the bound turn`)))}return}";
+    main = replaceRegexOnce(
+      main,
+      /\w+\.ipcMain\.handle\((?:`codex_desktop:message-from-view`|'codex_desktop:message-from-view'|"codex_desktop:message-from-view"|\w+),async\((\w+),(\w+)\)=>\{if\(!(\w+)\(\1\)\)return;/,
+      `$&${mainIpcTelegramResultHandlers}`,
+      "main ipc handler"
+    );
+  }
 
 const bootstrapReplacement = `try{
-let t=process.env.CODEX_PORTABLE_USER_DATA_DIR||m.app.getPath('userData')||(0,p.join)(process.env.LOCALAPPDATA||m.app.getPath('appData'),'CodexPortableData'),
-n=async r=>{if(!r)return;let i=await Y9('local');i&&(i.isMinimized()&&i.restore(),i.show(),i.focus(),$9(i,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,750)));},
-o=async({prompt:r,cwd:i}={})=>{let a=await Y9('local');if(a){a.isMinimized()&&a.restore(),a.show(),a.focus();let e={focusComposerNonce:Date.now()};typeof r=='string'&&r.trim().length>0&&(e.prefillPrompt=r),typeof i=='string'&&i.trim().length>0&&(e.prefillCwd=i),$9(a,'/',e),await new Promise(e=>setTimeout(e,750));}},
-s=async({input:r,attachments:i=[],cwd:a=null,workspaceRoots:o=[],settings:s=null}={})=>{let c=await Y9('local');if(!c)throw Error('Failed to open the Codex window');c.isMinimized()&&c.restore(),c.show(),c.focus();let l=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,u=globalThis.__codexTelegramStartConversationRequests||(globalThis.__codexTelegramStartConversationRequests=new Map),d=Array.isArray(o)?o.filter(e=>typeof e=='string'&&e.trim().length>0):[],f=typeof a=='string'&&a.trim().length>0?a:d[0]??null,p=null;if(s&&((typeof s.model=='string'&&s.model.trim().length>0)||(typeof s.effort=='string'&&s.effort.trim().length>0))){p={mode:\`default\`,settings:{model:typeof s.model=='string'&&s.model.trim().length>0?s.model.trim():null,reasoning_effort:typeof s.effort=='string'&&s.effort.trim().length>0?s.effort.trim():null,developer_instructions:null}}}let m=new Promise((e,t)=>{let n=setTimeout(()=>{u.delete(l),t(Error('Timed out waiting for Codex to create the new thread'))},3e4);u.set(l,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(c,{type:\`telegram-start-conversation\`,requestId:l,input:Array.isArray(r)?r:[],attachments:Array.isArray(i)?i:[],cwd:f,workspaceRoots:d,collaborationMode:p});return await m},
-c=async r=>{let i=N9(hA),a={...i.get(\`electron-persisted-atom-state\`)??{}};r==null?delete a[\`default-service-tier\`]:a[\`default-service-tier\`]=r,i.set(\`electron-persisted-atom-state\`,a),L9.sendMessageToAllWindows(hA,{type:\`persisted-atom-updated\`,key:\`default-service-tier\`,value:r==null?null:r,deleted:r==null})},
-d=async({conversationId:r,serviceTier:i,source:a=\`telegram\`}={})=>{if(!r)throw Error('Missing conversationId for telegram service tier update');let o=await Y9('local');if(!o)throw Error('Failed to open the Codex window');o.isMinimized()&&o.restore(),o.show(),o.focus(),$9(o,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900));let s=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,c=globalThis.__codexTelegramSetServiceTierRequests||(globalThis.__codexTelegramSetServiceTierRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply service tier'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(o,{type:\`telegram-set-service-tier\`,requestId:s,conversationId:r,serviceTier:i??null,source:a});return await l},
-f=async({conversationId:r=null,model:i=null,reasoningEffort:a=null}={})=>{let o=await Y9('local');if(!o)throw Error('Failed to open the Codex window');o.isMinimized()&&o.restore(),o.show(),o.focus(),r&&($9(o,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900)));let s=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,c=globalThis.__codexTelegramSetModelAndReasoningRequests||(globalThis.__codexTelegramSetModelAndReasoningRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply model and reasoning'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(o,{type:\`telegram-set-model-and-reasoning\`,requestId:s,conversationId:r??null,model:i,reasoningEffort:a});return await l},
-g=async({conversationId:r=null,permissionMode:i=null}={})=>{let o=await Y9('local');if(!o)throw Error('Failed to open the Codex window');o.isMinimized()&&o.restore(),o.show(),o.focus(),r&&($9(o,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900)));let s=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,c=globalThis.__codexTelegramSetPermissionModeRequests||(globalThis.__codexTelegramSetPermissionModeRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply permission mode'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(o,{type:\`telegram-set-permission-mode\`,requestId:s,conversationId:r??null,permissionMode:i});return await l},
-h=async({conversationId:r=null,reason:i=\`telegram_current\`}={})=>{let o=await Y9('local');if(!o)throw Error('Failed to open the Codex window');o.isMinimized()&&o.restore(),o.show(),o.focus(),r&&($9(o,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900)));let s=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,c=globalThis.__codexTelegramGetCurrentStateRequests||(globalThis.__codexTelegramGetCurrentStateRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex current state'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(o,{type:\`telegram-get-current-state\`,requestId:s,conversationId:r??null,reason:i});return await l},
-i=async({conversationId:r,input:i=[],attachments:a=[],cwd:o=null,workspaceRoots:s=[],settings:c=null}={})=>{if(!r)throw Error('Missing conversationId for telegram bound turn');let l=await Y9('local');if(!l)throw Error('Failed to open the Codex window');l.isMinimized()&&l.restore(),l.show(),l.focus(),$9(l,\`/local/\${r}\`),await new Promise(e=>setTimeout(e,900));let u=typeof O.randomUUID=='function'?O.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,d=globalThis.__codexTelegramSubmitBoundTurnRequests||(globalThis.__codexTelegramSubmitBoundTurnRequests=new Map),f=new Promise((e,t)=>{let n=setTimeout(()=>{d.delete(u),t(Error('Timed out waiting for Codex to submit the bound turn'))},15e3);d.set(u,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});L9.sendMessageToWindow(l,{type:\`telegram-submit-bound-turn\`,requestId:u,hostId:\`local\`,conversationId:r,input:Array.isArray(i)?i:[],attachments:Array.isArray(a)?a:[],cwd:typeof o=='string'&&o.trim().length>0?o:null,workspaceRoots:Array.isArray(s)?s.filter(e=>typeof e=='string'&&e.trim().length>0):[],settings:c});return await f},
+let qe=require('electron'),
+rt=require('node:crypto'),
+pt=require('node:path'),
+tt='codex_desktop:message-for-view',
+t=process.env.CODEX_PORTABLE_USER_DATA_DIR||qe.app.getPath('userData')||pt.join(process.env.LOCALAPPDATA||qe.app.getPath('appData'),'CodexPortableData'),
+nt=()=>qe.BrowserWindow.getAllWindows().filter(e=>e&&!e.isDestroyed()&&e.webContents&&!e.webContents.isDestroyed()),
+it=()=>{let e=nt()[0]??null;if(!e)throw Error('Failed to find a Codex window');return e;},
+at=e=>{if(e.isMinimized())e.restore();e.show();e.focus();return e;},
+ot=(e,n)=>{e.webContents.send(tt,n);},
+st=async(e,n=null,r=750)=>{let i=at(it());ot(i,{type:\`navigate-to-route\`,path:e,state:n});await new Promise(e=>setTimeout(e,r));return i;},
+n=async r=>{if(!r)return;await st(\`/local/\${r}\`,null,750);},
+o=async({prompt:r,cwd:i}={})=>{let a={focusComposerNonce:Date.now()};typeof r=='string'&&r.trim().length>0&&(a.prefillPrompt=r),typeof i=='string'&&i.trim().length>0&&(a.prefillCwd=i),await st('/',a,750);},
+ct=()=>typeof rt.randomUUID=='function'?rt.randomUUID():\`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`,
+ut=async({conversationId:r=null,windowRef:i=null,maxAttempts:a=6,timeoutMs:o=1500,delayMs:s=250}={})=>{let c=null;for(let l=0;l<a;l++)try{return await h({conversationId:r,reason:\`telegram_bound_turn_ready\`,windowRef:i,skipNavigation:!0,timeoutMs:o})}catch(e){if(c=e,l===a-1)break;await new Promise(e=>setTimeout(e,s))}throw c??Error('Timed out waiting for Codex view readiness')},
+s=async({input:r,attachments:i=[],cwd:a=null,workspaceRoots:o=[],settings:s=null}={})=>{let c=at(it()),l=ct(),u=globalThis.__codexTelegramStartConversationRequests||(globalThis.__codexTelegramStartConversationRequests=new Map),d=Array.isArray(o)?o.filter(e=>typeof e=='string'&&e.trim().length>0):[],f=typeof a=='string'&&a.trim().length>0?a:d[0]??null,p=null;if(s&&((typeof s.model=='string'&&s.model.trim().length>0)||(typeof s.effort=='string'&&s.effort.trim().length>0))){p={mode:\`default\`,settings:{model:typeof s.model=='string'&&s.model.trim().length>0?s.model.trim():null,reasoning_effort:typeof s.effort=='string'&&s.effort.trim().length>0?s.effort.trim():null,developer_instructions:null}}}let m=new Promise((e,t)=>{let n=setTimeout(()=>{u.delete(l),t(Error('Timed out waiting for Codex to create the new thread'))},3e4);u.set(l,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});ot(c,{type:\`telegram-start-conversation\`,requestId:l,input:Array.isArray(r)?r:[],attachments:Array.isArray(i)?i:[],cwd:f,workspaceRoots:d,collaborationMode:p});return await m},
+c=async r=>{for(let e of nt())ot(e,{type:\`persisted-atom-updated\`,key:\`default-service-tier\`,value:r==null?null:r,deleted:r==null});return r??null;},
+d=async({conversationId:r,serviceTier:i,source:a=\`telegram\`}={})=>{if(!r)throw Error('Missing conversationId for telegram service tier update');let o=await st(\`/local/\${r}\`,null,900),s=ct(),c=globalThis.__codexTelegramSetServiceTierRequests||(globalThis.__codexTelegramSetServiceTierRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply service tier'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});ot(o,{type:\`telegram-set-service-tier\`,requestId:s,conversationId:r,serviceTier:i??null,source:a});return await l},
+f=async({conversationId:r=null,model:i=null,reasoningEffort:a=null}={})=>{let o=r?await st(\`/local/\${r}\`,null,900):at(it()),s=ct(),c=globalThis.__codexTelegramSetModelAndReasoningRequests||(globalThis.__codexTelegramSetModelAndReasoningRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply model and reasoning'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});ot(o,{type:\`telegram-set-model-and-reasoning\`,requestId:s,conversationId:r??null,model:i,reasoningEffort:a});return await l},
+g=async({conversationId:r=null,permissionMode:i=null}={})=>{let o=r?await st(\`/local/\${r}\`,null,900):at(it()),s=ct(),c=globalThis.__codexTelegramSetPermissionModeRequests||(globalThis.__codexTelegramSetPermissionModeRequests=new Map),l=new Promise((e,t)=>{let n=setTimeout(()=>{c.delete(s),t(Error('Timed out waiting for Codex to apply permission mode'))},15e3);c.set(s,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});ot(o,{type:\`telegram-set-permission-mode\`,requestId:s,conversationId:r??null,permissionMode:i});return await l},
+h=async({conversationId:r=null,reason:i=\`telegram_current\`,windowRef:a=null,skipNavigation:o=!1,timeoutMs:s=15e3}={})=>{let c=a??(o?at(it()):r?await st(\`/local/\${r}\`,null,900):at(it())),l=ct(),u=globalThis.__codexTelegramGetCurrentStateRequests||(globalThis.__codexTelegramGetCurrentStateRequests=new Map),d=new Promise((e,t)=>{let n=setTimeout(()=>{u.delete(l),t(Error('Timed out waiting for Codex current state'))},s);u.set(l,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});ot(c,{type:\`telegram-get-current-state\`,requestId:l,conversationId:r??null,reason:i});return await d},
+i=async({conversationId:r,input:i=[],attachments:a=[],cwd:o=null,workspaceRoots:s=[],settings:c=null}={})=>{if(!r)throw Error('Missing conversationId for telegram bound turn');let l=await st(\`/local/\${r}\`,null,900);await ut({conversationId:r,windowRef:l});let u=ct(),d=globalThis.__codexTelegramSubmitBoundTurnRequests||(globalThis.__codexTelegramSubmitBoundTurnRequests=new Map),f=new Promise((e,t)=>{let n=setTimeout(()=>{d.delete(u),t(Error('Timed out waiting for Codex to submit the bound turn'))},15e3);d.set(u,{resolve:r=>{clearTimeout(n),e(r)},reject:e=>{clearTimeout(n),t(e)}})});ot(l,{type:\`telegram-submit-bound-turn\`,requestId:u,hostId:\`local\`,conversationId:r,input:Array.isArray(i)?i:[],attachments:Array.isArray(a)?a:[],cwd:typeof o=='string'&&o.trim().length>0?o:null,workspaceRoots:Array.isArray(s)?s.filter(e=>typeof e=='string'&&e.trim().length>0):[],settings:c});return await f},
 l=require('./telegram-native.js');
-typeof l.stopNativeTelegramBridge=='function'&&m.app.once('before-quit',()=>{l.stopNativeTelegramBridge().catch(e=>console.error('[telegram-native-stop]',e))}),
+typeof l.stopNativeTelegramBridge=='function'&&qe.app.once('before-quit',()=>{l.stopNativeTelegramBridge().catch(e=>console.error('[telegram-native-stop]',e))}),
 l.startNativeTelegramBridge({userDataPath:t,ensureSessionOpen:n,openNewThread:o,startNewThreadTurn:s,setDefaultServiceTier:c,setThreadServiceTier:d,setModelAndReasoning:f,setPermissionMode:g,getCurrentAppState:h,submitBoundThreadTurn:i}).catch(e=>console.error('[telegram-native]',e));
 }catch(e){console.error('[telegram-native-load]',e);}`;
-const existingBootstrapPattern = /try\{let [^;]+?require\('\.\/telegram-native\.js'\)[\s\S]*?console\.error\('\[telegram-native-load\]',e\);\}/;
-if (existingBootstrapPattern.test(main)) {
-  main = main.replace(existingBootstrapPattern, bootstrapReplacement);
-} else if (!main.includes("setModelAndReasoning:")) {
-  main = replaceRegexOnce(
-    main,
-    /var\s+\w+=process\.env\.CODEX_ELECTRON_AGENT_RUN_ID\?\.trim\(\)\|\|null;/,
-    match => `${bootstrapReplacement}${match}`,
-    "portable telegram bootstrap anchor"
-  );
+  const existingBootstrapPattern = /try\{let [^;]+?require\('\.\/telegram-native\.js'\)[\s\S]*?console\.error\('\[telegram-native-load\]',e\);\}/;
+  if (existingBootstrapPattern.test(main)) {
+    main = main.replace(existingBootstrapPattern, bootstrapReplacement);
+  } else if (!main.includes("setModelAndReasoning:")) {
+    main = replaceRegexOnce(
+      main,
+      /exports\.runMainAppStartup=\w+;/,
+      match => `${bootstrapReplacement}${match}`,
+      "telegram bootstrap anchor"
+    );
+  }
+
+  const rendererFileName = path.basename(rendererPath);
+  renderer = injectTelegramStartConversationCase(renderer, rendererFileName);
+  renderer = injectTelegramSetServiceTierCase(renderer, rendererFileName);
+  renderer = injectTelegramSetModelAndReasoningCase(renderer, rendererFileName);
+  renderer = injectTelegramSetPermissionModeCase(renderer, rendererFileName);
+  renderer = injectTelegramGetCurrentStateCase(renderer, rendererFileName);
+  renderer = injectTelegramSubmitBoundTurnCase(renderer, rendererFileName);
+
+  if (!renderer.includes("globalThis.__codexTelegramConversationStarter=")) {
+    const newConversationStarterAnchor = "be(`implement-todo`,r),null}";
+    if (renderer.includes(newConversationStarterAnchor)) {
+      renderer = replaceOnce(
+        renderer,
+        newConversationStarterAnchor,
+        `globalThis.__codexTelegramConversationStarter={startConversation:e=>t.startConversation(e)};${newConversationStarterAnchor}`,
+        "renderer conversation starter hook"
+      );
+    } else {
+      const currentConversationStarterAnchor = "function ZFe(){let e=(0,Q.c)(3),t=tt(),n=x(),r;";
+      if (renderer.includes(currentConversationStarterAnchor)) {
+        renderer = replaceOnce(
+          renderer,
+          currentConversationStarterAnchor,
+          "function ZFe(){let e=(0,Q.c)(3),t=tt(),n=x(),r;globalThis.__codexTelegramConversationStarter={startConversation:async e=>await t.startConversation({input:Array.isArray(e?.input)?e.input:[],attachments:Array.isArray(e?.attachments)?e.attachments:[],cwd:typeof e?.cwd==`string`&&e.cwd.trim().length>0?e.cwd:null,workspaceRoots:Array.isArray(e?.workspaceRoots)?e.workspaceRoots.filter(t=>typeof t==`string`&&t.trim().length>0):[],collaborationMode:e?.collaborationMode??null})};",
+          "renderer conversation starter hook"
+        );
+      } else {
+        renderer = replaceRegexOnce(
+          renderer,
+          /\{children:n\}=e,r=Nn\(\),i=On\(\),a=I\(\),o=xhe\(\),s=xt\(\),c=v\(F9\),l;/,
+          (match) => `${match}globalThis.__codexTelegramConversationStarter={startConversation:e=>r.startConversation(e)};`,
+          "renderer conversation starter hook"
+        );
+      }
+    }
+  }
+
+  if (!renderer.includes("globalThis.__codexTelegramServiceTierController=")) {
+    const newServiceTierAnchor = "M=po(),{serviceTierSettings:N,setServiceTier:P}=fo(c),F=d===`connected`,I=O.mode===`plan`,L;";
+    if (renderer.includes(newServiceTierAnchor)) {
+      renderer = replaceOnce(
+        renderer,
+        newServiceTierAnchor,
+        `${newServiceTierAnchor}globalThis.__codexTelegramServiceTierController={conversationId:c,setServiceTier:P,serviceTierSettings:N};`,
+        "renderer service tier controller hook"
+      );
+    } else {
+      const currentServiceTierAnchor = "M=Lr(),{serviceTierSettings:N,setServiceTier:P}=Fr(s),F=u===`connected`,I=O.mode===`plan`,L;";
+      if (renderer.includes(currentServiceTierAnchor)) {
+        renderer = replaceOnce(
+          renderer,
+          currentServiceTierAnchor,
+          "M=Lr(),{serviceTierSettings:N,setServiceTier:P}=Fr(s),F=u===`connected`,I=O.mode===`plan`,L;globalThis.__codexTelegramServiceTierController={conversationId:s,setServiceTier:P,serviceTierSettings:N};",
+          "renderer service tier controller hook"
+        );
+      } else {
+        renderer = replaceOnce(
+          renderer,
+          "R=A.mode===`plan`,z;",
+          "R=A.mode===`plan`,z;globalThis.__codexTelegramServiceTierController={conversationId:c,setServiceTier:I,serviceTierSettings:F};",
+          "renderer service tier controller hook"
+        );
+      }
+    }
+  }
+
+  if (!renderer.includes("globalThis.__codexTelegramModelController=")) {
+    const newModelAnchor = "let w=C,T;return t[22]!==w||t[23]!==S?(T={setModelAndReasoningEffort:S,modelSettings:w},t[22]=w,t[23]=S,t[24]=T):T=t[24],T}";
+    if (renderer.includes(newModelAnchor)) {
+      renderer = replaceOnce(
+        renderer,
+        newModelAnchor,
+        "let w=C,T;globalThis.__codexTelegramModelController={conversationId:n,setModelAndReasoningEffort:S,modelSettings:w};return t[22]!==w||t[23]!==S?(T={setModelAndReasoningEffort:S,modelSettings:w},t[22]=w,t[23]=S,t[24]=T):T=t[24],T}",
+        "renderer model controller hook"
+      );
+    } else {
+      renderer = replaceOnce(
+        renderer,
+        "v=Fn(n,VK),y;",
+        "v=Fn(n,VK),y;globalThis.__codexTelegramModelController={conversationId:n,setModelAndReasoningEffort:g,modelSettings:h};",
+        "renderer model controller hook"
+      );
+    }
+  }
+
+  if (!renderer.includes("globalThis.__codexTelegramPermissionController=")) {
+    const currentPermissionAnchor = "let Ue;return t[116]!==ze||t[117]!==He?(Ue=(0,$.jsxs)($.Fragment,{children:[ze,He]}),t[116]=ze,t[117]=He,t[118]=Ue):Ue=t[118],Ue}";
+    const newPermissionAnchor = "let Ge;return t[116]!==Ve||t[117]!==We?(Ge=(0,Z.jsxs)(Z.Fragment,{children:[Ve,We]}),t[116]=Ve,t[117]=We,t[118]=Ge):Ge=t[118],Ge}";
+    if (renderer.includes(currentPermissionAnchor)) {
+      renderer = replaceOnce(
+        renderer,
+        currentPermissionAnchor,
+        "globalThis.__codexTelegramPermissionController={conversationId:n,permissionMode:s,selectDefault:G,selectCustom:te,selectFullAccess:q,confirmFullAccess:Ve,applyPermissionMode:e=>{if(e==null||e===`default`||e===`auto`||e===`read-only`||e===`workspace-write`){G();return}if(e===`full-access`||e===`danger-full-access`){q();return}if(e===`custom`){te();return}throw Error(`Unsupported permission mode: ${String(e)}`)}};let Ue;return t[116]!==ze||t[117]!==He?(Ue=(0,$.jsxs)($.Fragment,{children:[ze,He]}),t[116]=ze,t[117]=He,t[118]=Ue):Ue=t[118],Ue}",
+        "renderer permission controller hook"
+      );
+    } else if (renderer.includes(newPermissionAnchor)) {
+      renderer = replaceOnce(
+        renderer,
+        newPermissionAnchor,
+        "let Ge;globalThis.__codexTelegramPermissionController={conversationId:n,permissionMode:s,selectDefault:q,selectCustom:re,confirmFullAccess:Ue,applyPermissionMode:e=>{if(e==null||e===`default`||e===`auto`||e===`read-only`||e===`workspace-write`){q();return}if(e===`full-access`||e===`danger-full-access`){Ue();return}if(e===`custom`){re();return}throw Error(`Unsupported permission mode: ${String(e)}`)}};return t[116]!==Ve||t[117]!==We?(Ge=(0,Z.jsxs)(Z.Fragment,{children:[Ve,We]}),t[116]=Ve,t[117]=We,t[118]=Ge):Ge=t[118],Ge}",
+        "renderer permission controller hook"
+      );
+    } else {
+      renderer = replaceOnce(
+        renderer,
+        "t[113]=d,t[114]=We,t[115]=Ge):Ge=t[115];let Ke;",
+        "t[113]=d,t[114]=We,t[115]=Ge):Ge=t[115];globalThis.__codexTelegramPermissionController={conversationId:n,permissionMode:s,selectDefault:K,selectCustom:te,confirmFullAccess:We,applyPermissionMode:e=>{if(e==null||e===`default`||e===`auto`||e===`read-only`||e===`workspace-write`){K();return}if(e===`full-access`||e===`danger-full-access`){We();return}if(e===`custom`){te();return}throw Error(`Unsupported permission mode: ${String(e)}`)}};let Ke;",
+        "renderer permission controller hook"
+      );
+    }
+  }
+
+  fs.writeFileSync(mainPath, main, "utf8");
+  fs.writeFileSync(rendererPath, renderer, "utf8");
+  fs.copyFileSync(telegramSource, telegramDest);
+
+  return {
+    extractDir,
+    rendererPath,
+    mutateIdentity,
+  };
 }
 
-const rendererFileName = path.basename(rendererPath);
-renderer = injectTelegramStartConversationCase(renderer, rendererFileName);
-renderer = injectTelegramSetServiceTierCase(renderer, rendererFileName);
-renderer = injectTelegramSetModelAndReasoningCase(renderer, rendererFileName);
-renderer = injectTelegramSetPermissionModeCase(renderer, rendererFileName);
-renderer = injectTelegramGetCurrentStateCase(renderer, rendererFileName);
-renderer = injectTelegramSubmitBoundTurnCase(renderer, rendererFileName);
-
-if (!renderer.includes("globalThis.__codexTelegramConversationStarter=")) {
-  renderer = replaceRegexOnce(
-    renderer,
-    /\{children:n\}=e,r=Nn\(\),i=On\(\),a=I\(\),o=xhe\(\),s=xt\(\),c=v\(F9\),l;/,
-    (match) => `${match}globalThis.__codexTelegramConversationStarter={startConversation:e=>r.startConversation(e)};`,
-    "renderer conversation starter hook"
-  );
-}
-
-if (!renderer.includes("globalThis.__codexTelegramServiceTierController=")) {
-  renderer = replaceOnce(
-    renderer,
-    "R=A.mode===`plan`,z;",
-    "R=A.mode===`plan`,z;globalThis.__codexTelegramServiceTierController={conversationId:c,setServiceTier:I,serviceTierSettings:F};",
-    "renderer service tier controller hook"
-  );
-}
-
-if (!renderer.includes("globalThis.__codexTelegramModelController=")) {
-  renderer = replaceOnce(
-    renderer,
-    "v=Fn(n,VK),y;",
-    "v=Fn(n,VK),y;globalThis.__codexTelegramModelController={conversationId:n,setModelAndReasoningEffort:g,modelSettings:h};",
-    "renderer model controller hook"
-  );
-}
-
-if (!renderer.includes("globalThis.__codexTelegramPermissionController=")) {
-  renderer = replaceOnce(
-    renderer,
-    "t[113]=d,t[114]=We,t[115]=Ge):Ge=t[115];let Ke;",
-    "t[113]=d,t[114]=We,t[115]=Ge):Ge=t[115];globalThis.__codexTelegramPermissionController={conversationId:n,permissionMode:s,selectDefault:K,selectCustom:te,confirmFullAccess:We,applyPermissionMode:e=>{if(e==null||e===`default`||e===`auto`||e===`read-only`||e===`workspace-write`){K();return}if(e===`full-access`||e===`danger-full-access`){We();return}if(e===`custom`){te();return}throw Error(`Unsupported permission mode: ${String(e)}`)}};let Ke;",
-    "renderer permission controller hook"
-  );
-}
-
-fs.writeFileSync(mainPath, main, "utf8");
-fs.writeFileSync(rendererPath, renderer, "utf8");
-fs.copyFileSync(telegramSource, telegramDest);
-
-console.log(`INJECTED_NATIVE_TELEGRAM renderer=${path.relative(extractDir, rendererPath)}`);
+const options = parseArgs(process.argv.slice(2));
+const result = injectTelegramBridge(options.extractDir, { mutateIdentity: options.mutateIdentity });
+console.log(
+  `INJECTED_NATIVE_TELEGRAM extract=${result.extractDir} renderer=${path.relative(result.extractDir, result.rendererPath)} mutateIdentity=${result.mutateIdentity}`
+);

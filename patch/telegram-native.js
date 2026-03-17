@@ -19,6 +19,7 @@ const DEFAULT_IPC_CONNECT_TIMEOUT_MS = 30000;
 const DEFAULT_IPC_RETRY_DELAY_MS = 500;
 const DEFAULT_TURN_INJECT_RETRY_COUNT = 3;
 const DEFAULT_TURN_INJECT_RETRY_DELAY_MS = 900;
+const DEFAULT_TURN_DELIVERY_ACK_TIMEOUT_MS = 17000;
 const DEFAULT_LABEL = "Default";
 const DEFAULT_PERMISSION_LABEL = "Basic permission";
 const FAST_OPTIONS = [
@@ -145,7 +146,7 @@ function isRetryableTurnInjectError(error) {
 }
 
 function appendBootstrapLog(message) {
-    const bootstrapLogPath = path.join(process.env.TEMP || os.tmpdir(), "codex-portable-telegram-bootstrap.log");
+    const bootstrapLogPath = path.join(process.env.TEMP || os.tmpdir(), "codex-telegram-bootstrap.log");
     try {
         fs.appendFileSync(bootstrapLogPath, `${new Date().toISOString()} ${message}\n`, "utf8");
     } catch {}
@@ -155,9 +156,13 @@ function ensureDir(dirPath) {
     fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function readUtf8Text(filePath) {
+    return fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+}
+
 function readJsonObject(filePath, fallback = {}) {
     try {
-        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+        return JSON.parse(readUtf8Text(filePath));
     } catch {
         return { ...fallback };
     }
@@ -220,7 +225,7 @@ function loadConfig(configPath) {
     }
     const absoluteConfigPath = path.resolve(configPath);
     const baseDir = path.dirname(absoluteConfigPath);
-    const raw = fs.readFileSync(absoluteConfigPath, "utf8");
+    const raw = readUtf8Text(absoluteConfigPath);
     const parsed = JSON.parse(raw);
 
     const stateDir = resolvePath(baseDir, parsed.stateDir, "./state");
@@ -891,6 +896,111 @@ function buildMirrorFingerprint(message) {
     return JSON.stringify({ text, images, attachments });
 }
 
+function clonePatchValue(value) {
+    if (!value || typeof value !== "object") {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => clonePatchValue(entry));
+    }
+    const cloned = {};
+    for (const [key, entry] of Object.entries(value)) {
+        cloned[key] = clonePatchValue(entry);
+    }
+    return cloned;
+}
+
+function createPatchContainer(nextSegment) {
+    return typeof nextSegment === "number" || nextSegment === "-" ? [] : {};
+}
+
+function applyConversationPatch(baseState, patch) {
+    const op = String(patch?.op || "");
+    const pathSegments = Array.isArray(patch?.path) ? patch.path : [];
+    if (!pathSegments.length) {
+        if (op === "remove") {
+            return {};
+        }
+        if (op === "add" || op === "replace") {
+            return clonePatchValue(patch?.value);
+        }
+        return baseState;
+    }
+
+    let state = baseState;
+    if (!state || typeof state !== "object") {
+        state = {};
+    }
+
+    let target = state;
+    for (let index = 0; index < pathSegments.length - 1; index += 1) {
+        const rawKey = pathSegments[index];
+        const nextSegment = pathSegments[index + 1];
+        if (Array.isArray(target)) {
+            const key = rawKey === "-" ? target.length : Number(rawKey);
+            if (!Number.isInteger(key) || key < 0) {
+                return state;
+            }
+            if (!target[key] || typeof target[key] !== "object") {
+                target[key] = createPatchContainer(nextSegment);
+            }
+            target = target[key];
+            continue;
+        }
+
+        const key = String(rawKey);
+        if (!target[key] || typeof target[key] !== "object") {
+            target[key] = createPatchContainer(nextSegment);
+        }
+        target = target[key];
+    }
+
+    const leafSegment = pathSegments[pathSegments.length - 1];
+    if (Array.isArray(target)) {
+        const key = leafSegment === "-" ? target.length : Number(leafSegment);
+        if (!Number.isInteger(key) || key < 0) {
+            return state;
+        }
+        if (op === "remove") {
+            if (key < target.length) {
+                target.splice(key, 1);
+            }
+            return state;
+        }
+        const nextValue = clonePatchValue(patch?.value);
+        if (op === "add") {
+            if (key <= target.length) {
+                target.splice(key, 0, nextValue);
+            } else {
+                target[key] = nextValue;
+            }
+            return state;
+        }
+        if (op === "replace") {
+            target[key] = nextValue;
+        }
+        return state;
+    }
+
+    const key = String(leafSegment);
+    if (op === "remove") {
+        delete target[key];
+        return state;
+    }
+    if (op === "add" || op === "replace") {
+        target[key] = clonePatchValue(patch?.value);
+    }
+    return state;
+}
+
+function applyConversationPatches(baseState, patches) {
+    let nextState = baseState && typeof baseState === "object" ? baseState : {};
+    for (const patch of Array.isArray(patches) ? patches : []) {
+        nextState = applyConversationPatch(nextState, patch);
+    }
+    return nextState;
+}
+
 class OutputLogger {
     constructor(filePath) {
         this.filePath = filePath;
@@ -928,7 +1038,7 @@ function migrateLegacyConfigToPortable(userDataPath) {
     }
 
     try {
-        const legacy = JSON.parse(fs.readFileSync(legacyConfigPath, "utf8"));
+        const legacy = JSON.parse(readUtf8Text(legacyConfigPath));
         const stateDir = path.join(userDataPath, "telegram-native-state");
         const bindingsPath = path.join(stateDir, "chat_bindings.json");
         const telegramInboxDir = path.join(userDataPath, "telegram-native-inbox");
@@ -990,7 +1100,7 @@ class SessionBindings {
             return;
         }
         try {
-            const payload = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+            const payload = JSON.parse(readUtf8Text(this.filePath));
             const mapping = payload.chat_to_session || {};
             this.chatToSession = Object.fromEntries(Object.entries(mapping).map(([chatId, sessionId]) => [String(chatId), String(sessionId)]));
         } catch {
@@ -1054,7 +1164,7 @@ class ChatSettingsStore {
             return;
         }
         try {
-            const payload = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+            const payload = JSON.parse(readUtf8Text(this.filePath));
             this.chatSettings = payload.chat_settings || {};
         } catch {
             this.chatSettings = {};
@@ -1094,7 +1204,7 @@ class PendingNewThreadStore {
             return;
         }
         try {
-            const payload = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+            const payload = JSON.parse(readUtf8Text(this.filePath));
             this.pendingByChat = payload.pending_new_thread || {};
         } catch {
             this.pendingByChat = {};
@@ -1134,10 +1244,11 @@ class PendingNewThreadStore {
 }
 
 class ModelCatalog {
-    constructor(logger) {
+    constructor(codexHome, logger) {
+        this.codexHome = codexHome;
         this.logger = logger;
-        this.modelsPath = path.join(os.homedir(), ".codex", "models_cache.json");
-        this.configPath = path.join(os.homedir(), ".codex", "config.toml");
+        this.modelsPath = path.join(this.codexHome, "models_cache.json");
+        this.configPath = path.join(this.codexHome, "config.toml");
         this.cachedAtMs = 0;
         this.modelOptions = [{ id: "default", label: DEFAULT_LABEL, value: null }];
         this.modelMap = new Map();
@@ -1257,9 +1368,10 @@ class ModelCatalog {
 }
 
 class SessionCatalog {
-    constructor(logger) {
+    constructor(codexHome, logger) {
+        this.codexHome = codexHome;
         this.logger = logger;
-        this.sessionsRoot = path.join(os.homedir(), ".codex", "sessions");
+        this.sessionsRoot = path.join(this.codexHome, "sessions");
     }
 
     collectSessionFiles() {
@@ -1756,7 +1868,9 @@ class AppBroadcastMonitor {
         this.ipc = new CodexIpcClient(config.codexIpcPipe, logger);
         this.started = false;
         this.knownItemIds = new Map();
+        this.conversationStates = new Map();
         this.pendingSuppressions = new Map();
+        this.pendingDeliveryWaiters = new Map();
     }
 
     async start() {
@@ -1781,6 +1895,84 @@ class AppBroadcastMonitor {
             queue.shift();
         }
         this.pendingSuppressions.set(sessionId, queue);
+    }
+
+    removePendingDeliveryWaiter(sessionId, waiter) {
+        const queue = this.pendingDeliveryWaiters.get(sessionId) || [];
+        const index = queue.indexOf(waiter);
+        if (index === -1) {
+            return;
+        }
+        queue.splice(index, 1);
+        if (queue.length) {
+            this.pendingDeliveryWaiters.set(sessionId, queue);
+        } else {
+            this.pendingDeliveryWaiters.delete(sessionId);
+        }
+    }
+
+    waitForUserMessageDelivery(sessionId, fingerprint, timeoutMs = DEFAULT_TURN_DELIVERY_ACK_TIMEOUT_MS) {
+        let settled = false;
+        let resolvePromise = null;
+        let rejectPromise = null;
+        const waiter = {
+            fingerprint,
+            resolve: (payload) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timeoutHandle);
+                this.removePendingDeliveryWaiter(sessionId, waiter);
+                resolvePromise(payload);
+            },
+            reject: (error) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timeoutHandle);
+                this.removePendingDeliveryWaiter(sessionId, waiter);
+                rejectPromise(error);
+            },
+        };
+        const promise = new Promise((resolve, reject) => {
+            resolvePromise = resolve;
+            rejectPromise = reject;
+        });
+        const timeoutHandle = setTimeout(() => {
+            waiter.reject(new Error(`Timed out waiting for delivered user message echo for ${sessionId}`));
+        }, timeoutMs);
+        const queue = this.pendingDeliveryWaiters.get(sessionId) || [];
+        queue.push(waiter);
+        this.pendingDeliveryWaiters.set(sessionId, queue);
+        return {
+            promise,
+            cancel: () => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timeoutHandle);
+                this.removePendingDeliveryWaiter(sessionId, waiter);
+            },
+        };
+    }
+
+    resolvePendingUserMessageDelivery(sessionId, fingerprint, payload = null) {
+        const queue = this.pendingDeliveryWaiters.get(sessionId) || [];
+        const index = queue.findIndex((waiter) => waiter.fingerprint === fingerprint);
+        if (index === -1) {
+            return false;
+        }
+        const [waiter] = queue.splice(index, 1);
+        if (queue.length) {
+            this.pendingDeliveryWaiters.set(sessionId, queue);
+        } else {
+            this.pendingDeliveryWaiters.delete(sessionId);
+        }
+        waiter.resolve(payload);
+        return true;
     }
 
     async connectWithRetry(timeoutMs = DEFAULT_IPC_CONNECT_TIMEOUT_MS) {
@@ -1811,6 +2003,14 @@ class AppBroadcastMonitor {
             ...(settingsOverride || {}),
         };
         const useBoundTurnBridge = typeof this.config.submitBoundThreadTurn === "function";
+        const suppressionMessage = {
+            text: String(turnPayload?.prompt || "").trim(),
+            images: Array.isArray(turnPayload?.input)
+                ? turnPayload.input.filter((item) => item?.type === "image").map((item) => item.url)
+                : [],
+            attachments: Array.isArray(turnPayload?.attachments) ? turnPayload.attachments : [],
+        };
+        const deliveryFingerprint = buildMirrorFingerprint(suppressionMessage);
         let lastError = null;
         for (let attempt = 1; attempt <= DEFAULT_TURN_INJECT_RETRY_COUNT; attempt += 1) {
             if (typeof this.config.ensureSessionOpen === "function") {
@@ -1822,14 +2022,37 @@ class AppBroadcastMonitor {
             this.logger.info(`inject session=${sessionId} attempt=${attempt} inputs=${turnPayload.input.length} attachments=${turnPayload.attachments.length}`);
             try {
                 if (useBoundTurnBridge) {
-                    await this.config.submitBoundThreadTurn({
+                    const deliveryWaiter = this.waitForUserMessageDelivery(sessionId, deliveryFingerprint);
+                    const submitOutcomePromise = this.config.submitBoundThreadTurn({
                         conversationId: sessionId,
                         input: turnPayload.input,
                         attachments: turnPayload.attachments,
                         cwd: settings.cwd ?? null,
                         workspaceRoots: settings.workspaceRoots || this.config.workspaceRoots,
                         settings,
+                    }).then(
+                        (conversationId) => ({ kind: "submit", ok: true, conversationId }),
+                        (error) => ({ kind: "submit", ok: false, error }),
+                    );
+                    let deliveryAcknowledged = false;
+                    submitOutcomePromise.then((outcome) => {
+                        if (deliveryAcknowledged && !outcome.ok) {
+                            this.logger.warn(`bound turn submit completion failed after delivery ack session=${sessionId} error=${String(outcome.error?.message || outcome.error)}`);
+                        }
                     });
+                    const deliveryOutcomePromise = deliveryWaiter.promise.then(
+                        (payload) => ({ kind: "delivery", payload }),
+                    );
+                    const firstOutcome = await Promise.race([submitOutcomePromise, deliveryOutcomePromise]);
+                    if (firstOutcome.kind === "submit") {
+                        deliveryWaiter.cancel();
+                        if (!firstOutcome.ok) {
+                            throw firstOutcome.error;
+                        }
+                    } else {
+                        deliveryAcknowledged = true;
+                        this.logger.info(`bound turn delivery acknowledged from conversation state session=${sessionId} item=${firstOutcome.payload?.messageId || "-"}`);
+                    }
                 } else {
                     await this.ipc.startTurnWithContent(sessionId, turnPayload.input, turnPayload.attachments, settings);
                 }
@@ -1864,12 +2087,32 @@ class AppBroadcastMonitor {
             return;
         }
         const change = params.change || {};
-        if (change.type !== "snapshot") {
+        if (change.type === "snapshot") {
+            const conversationState = change.conversationState && typeof change.conversationState === "object"
+                ? change.conversationState
+                : {};
+            this.conversationStates.set(conversationId, conversationState);
+            this.processSnapshot(String(chatId), conversationId, conversationState).catch((error) => {
+                this.logger.error(`snapshot processing failed: ${error.message}`);
+            });
             return;
         }
-        this.processSnapshot(String(chatId), conversationId, change.conversationState || {}).catch((error) => {
-            this.logger.error(`snapshot processing failed: ${error.message}`);
-        });
+        if (change.type === "patches") {
+            const baseline = this.conversationStates.get(conversationId);
+            if (!baseline) {
+                this.logger.warn(`patch mirror skipped without baseline session=${conversationId} patches=${Array.isArray(change.patches) ? change.patches.length : 0}`);
+                return;
+            }
+            try {
+                const conversationState = applyConversationPatches(baseline, change.patches);
+                this.conversationStates.set(conversationId, conversationState);
+                this.processSnapshot(String(chatId), conversationId, conversationState).catch((error) => {
+                    this.logger.error(`patch processing failed: ${error.message}`);
+                });
+            } catch (error) {
+                this.logger.error(`patch apply failed session=${conversationId}: ${error.message}`);
+            }
+        }
     }
 
     shouldSuppressUserEcho(sessionId, message) {
@@ -1881,6 +2124,10 @@ class AppBroadcastMonitor {
         }
         queue.splice(index, 1);
         this.pendingSuppressions.set(sessionId, queue);
+        this.resolvePendingUserMessageDelivery(sessionId, fingerprint, {
+            messageId: message?.id || null,
+            fingerprint,
+        });
         return true;
     }
 
@@ -1940,7 +2187,12 @@ class AppBroadcastMonitor {
         const messages = flattenConversationMessages(conversationState);
         let delivered = this.knownItemIds.get(conversationId);
         if (!delivered) {
-            delivered = new Set(messages.map((message) => message.id).filter(Boolean));
+            delivered = new Set(
+                messages
+                    .filter((message) => !(message.role === "assistant" && message.turnStatus === "inProgress"))
+                    .map((message) => message.id)
+                    .filter(Boolean),
+            );
             this.knownItemIds.set(conversationId, delivered);
             this.logger.info(`prime snapshot session=${conversationId} items=${delivered.size}`);
             return;
@@ -1983,8 +2235,8 @@ class CodexAppDirectCompanion {
         this.bindings = new SessionBindings(config.bindingsPath);
         this.chatSettings = new ChatSettingsStore(path.join(config.stateDir, DEFAULT_CHAT_SETTINGS_FILE));
         this.pendingNewThread = new PendingNewThreadStore(path.join(config.stateDir, DEFAULT_PENDING_NEW_THREAD_FILE));
-        this.modelCatalog = new ModelCatalog(logger);
-        this.catalog = new SessionCatalog(logger);
+        this.modelCatalog = new ModelCatalog(config.codexHome, logger);
+        this.catalog = new SessionCatalog(config.codexHome, logger);
         this.monitor = new AppBroadcastMonitor(this.api, this.bindings, config, logger);
         this.offset = null;
         this.disposed = false;
@@ -2163,6 +2415,24 @@ class CodexAppDirectCompanion {
         return lines.join("\n");
     }
 
+    async safeAnswerCallbackQuery(callbackId, text = "", context = "callback") {
+        if (!callbackId) {
+            return false;
+        }
+        try {
+            await this.api.answerCallbackQuery(callbackId, text);
+            return true;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const isExpired = message.includes("query is too old")
+                || message.includes("response timeout expired")
+                || message.includes("query ID is invalid");
+            const logMethod = isExpired ? "warn" : "error";
+            this.logger[logMethod](`answerCallbackQuery failed context=${context} error=${message}`);
+            return false;
+        }
+    }
+
     buildMainControlsMessage(chatId) {
         return {
             text: `Codex controls\n\n${this.formatSettingsSummary(chatId)}`,
@@ -2181,7 +2451,7 @@ class CodexAppDirectCompanion {
 
     async openNewThread(chatId, prompt = "", callbackId = null) {
         if (callbackId) {
-            await this.api.answerCallbackQuery(callbackId, "Opening new thread");
+            await this.safeAnswerCallbackQuery(callbackId, "Opening new thread", "open_new_thread");
         }
         if (typeof this.config.openNewThread !== "function") {
             await this.api.sendMessage(chatId, "The native Codex New Thread command is unavailable in this build.");
@@ -2479,12 +2749,10 @@ class CodexAppDirectCompanion {
     }
 
     async bindChatToSession(chatId, sessionId, callbackId = null) {
+        await this.safeAnswerCallbackQuery(callbackId, "Opening session", `bind_session:${sessionId}`);
         const previousSessionId = this.bindings.getSession(chatId) || null;
         const result = this.bindings.bind(chatId, sessionId);
         if (!result.ok) {
-            if (callbackId) {
-                await this.api.answerCallbackQuery(callbackId, result.message);
-            }
             await this.api.sendMessage(chatId, result.message);
             return result;
         }
@@ -2499,9 +2767,6 @@ class CodexAppDirectCompanion {
                     this.bindings.unbind(chatId);
                 }
                 const message = error instanceof Error ? error.message : String(error);
-                if (callbackId) {
-                    await this.api.answerCallbackQuery(callbackId, "Failed to open session");
-                }
                 await this.api.sendMessage(chatId, `Failed to open session ${sessionId} in the Codex app.\n\n${message}`);
                 return { ok: false, message };
             }
@@ -2509,9 +2774,6 @@ class CodexAppDirectCompanion {
 
         this.pendingNewThread.clear(chatId);
         await this.refreshChatSettingsFromApp(chatId, "bind_session");
-        if (callbackId) {
-            await this.api.answerCallbackQuery(callbackId, "Session updated");
-        }
         await this.sendSessionHistory(chatId, sessionId);
         return result;
     }
@@ -2673,7 +2935,7 @@ class CodexAppDirectCompanion {
             return;
         }
         if (!this.isAuthorized(chatId)) {
-            await this.api.answerCallbackQuery(callbackId, "Unauthorized chat.");
+            await this.safeAnswerCallbackQuery(callbackId, "Unauthorized chat.", "unauthorized_callback");
             return;
         }
         if (data === "action:new-thread") {
@@ -2682,7 +2944,7 @@ class CodexAppDirectCompanion {
         }
         if (data.startsWith("menu:")) {
             const kind = data.slice("menu:".length).trim();
-            await this.api.answerCallbackQuery(callbackId, "Opening menu");
+            await this.safeAnswerCallbackQuery(callbackId, "Opening menu", `open_menu:${kind}`);
             if (kind === "main") {
                 await this.showMainControls(chatId);
                 return;
@@ -2696,7 +2958,7 @@ class CodexAppDirectCompanion {
             return;
         }
         if (!data.startsWith("set:")) {
-            await this.api.answerCallbackQuery(callbackId, "Unknown action.");
+            await this.safeAnswerCallbackQuery(callbackId, "Unknown action.", `unknown_callback:${data}`);
             return;
         }
 
@@ -2719,7 +2981,7 @@ class CodexAppDirectCompanion {
         const options = optionMap[kind];
         const selected = options?.find((option) => option.id === rawValue);
         if (!selected) {
-            await this.api.answerCallbackQuery(callbackId, "Unsupported value");
+            await this.safeAnswerCallbackQuery(callbackId, "Unsupported value", `unsupported_value:${kind}`);
             return;
         }
 
@@ -2729,13 +2991,13 @@ class CodexAppDirectCompanion {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.logger.error(`applyNativeOptionSelection failed kind=${kind} error=${message}`);
-            await this.api.answerCallbackQuery(callbackId, "Failed to apply");
+            await this.safeAnswerCallbackQuery(callbackId, "Failed to apply", `apply_failed:${kind}`);
             await this.api.sendMessage(chatId, `Failed to apply ${selected.label} in the Codex app.\n\n${message}`);
             return;
         }
         this.chatSettings.update(chatId, patch);
         await this.refreshChatSettingsFromApp(chatId, `post_${kind}`);
-        await this.api.answerCallbackQuery(callbackId, `${kind} updated`);
+        await this.safeAnswerCallbackQuery(callbackId, `${kind} updated`, `apply_success:${kind}`);
         if (kind === "model") {
             const effortPicker = this.buildOptionPickerMessage(chatId, "effort");
             await this.api.sendMessageWithMarkup(
