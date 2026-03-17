@@ -32,14 +32,12 @@ Official website note:
 - ChatGPT Pro also includes Codex and ChatGPT agent on the official website
 - to use that official website flow, open ChatGPT, choose `agent mode` from the tools menu or type `/agent`, then describe the task you want done
 - ChatGPT agent can use a browser and terminal during the task
-- optional local Chrome CLI example from my setup:
 
 ```powershell
-node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js launch
-node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js status --json
+chrome.exe --remote-debugging-port=9333 --user-data-dir=C:\path\to\chrome-chatgpt-profile https://chatgpt.com/
 ```
 
-- after `https://chatgpt.com/` is open in that Chrome session, switch the page to `agent mode` or type `/agent`
+- then attach with your CDP client or browser automation tool, reuse the logged-in `https://chatgpt.com/` tab, and switch to `agent mode` or type `/agent`
 
 ## 1. Install repository dependencies
 

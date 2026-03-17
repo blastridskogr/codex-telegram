@@ -4,7 +4,7 @@ Unofficial Telegram integration for the Windows Codex app: real-time message syn
 
 [Features](docs/FEATURES.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
-This repository contains the patch source, workflow scripts, and setup docs for the Telegram-driven Codex workflow I actually run on Windows. It does **not** include OpenAI binaries, extracted bundles, rebuilt `app.asar`, or your runtime secrets.
+This repository contains the patch source, workflow scripts, and setup docs for a Telegram-driven Codex workflow on Windows. It does **not** include OpenAI binaries, extracted bundles, rebuilt `app.asar`, or your runtime secrets.
 
 ## Disclaimer
 
@@ -12,9 +12,9 @@ This repository contains the patch source, workflow scripts, and setup docs for 
 - This repository documents a local patch and re-registration workflow. It does **not** redistribute Codex binaries or patched app bundles.
 - You are responsible for reviewing the current OpenAI terms and your local legal/compliance requirements before using, modifying, or publishing anything based on this workflow.
 
-## How I use it
+## Workflow Summary
 
-This repository is built around the way I actually use Codex:
+This repository is built around this workflow:
 
 - install the official Microsoft Store Codex app
 - confirm the official app works on its own before patching anything
@@ -30,20 +30,11 @@ Official web Pro note:
 
 Optional local Chrome CLI example:
 
-- my local Chrome CLI lives outside this repo at `C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js`
-- launch the dedicated Chrome session:
-
 ```powershell
-node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js launch
+chrome.exe --remote-debugging-port=9333 --user-data-dir=C:\path\to\chrome-chatgpt-profile https://chatgpt.com/
 ```
 
-- verify that the logged-in official site is open:
-
-```powershell
-node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js status --json
-```
-
-- once `https://chatgpt.com/` is open in that Chrome session, switch the page to `agent mode` or type `/agent`, then use the official website agent there
+- then attach with your CDP client or browser automation tool, reuse the logged-in `https://chatgpt.com/` tab, switch to `agent mode` or type `/agent`, and send the task
 
 The important boundary is:
 

@@ -1,6 +1,6 @@
 # Features
 
-This project documents the Telegram-driven Codex workflow I actually use on Windows: patch and re-register a local Codex app copy so Telegram can sync messages with it in real time and control Codex app commands through the same signed-in app session.
+This project documents a Telegram-driven Codex workflow on Windows: patch and re-register a local Codex app copy so Telegram can sync messages with it in real time and control Codex app commands through the same signed-in app session.
 
 It does **not** replace Codex with a separate bot backend. Telegram drives the same patched desktop app process, the same Codex conversations, and the same signed-in app account path.
 
