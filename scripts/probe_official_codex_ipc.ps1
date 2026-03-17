@@ -26,7 +26,7 @@ $officialProcesses = Get-Process -ErrorAction SilentlyContinue |
 
 $portableProcesses = Get-Process -ErrorAction SilentlyContinue |
   Where-Object {
-    $_.Path -like 'C:\skogr_project\codex_telegram\work\portable_package_root\app*'
+    $_.Path -like (Join-Path $repoRoot 'work\portable_package_root\app*')
   } |
   Sort-Object ProcessName, Id
 
