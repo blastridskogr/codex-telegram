@@ -1,6 +1,6 @@
 # Features
 
-This project documents the Telegram-driven Codex workflow I actually use on Windows: use the Codex app on the same official ChatGPT Pro account I use on the web, instruct that same Pro-backed account from the app and receive results back there, then patch and re-register a local copy so Telegram can control that same app session.
+This project documents the Telegram-driven Codex workflow I actually use on Windows: patch and re-register a local Codex app copy so Telegram can sync messages with it in real time and control Codex app commands through the same signed-in app session.
 
 It does **not** replace Codex with a separate bot backend. Telegram drives the same patched desktop app process, the same Codex conversations, and the same signed-in app account path.
 
@@ -23,6 +23,7 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 - Plain Telegram text is injected as a Codex user turn.
 - Telegram documents are staged locally and passed as attachments.
 - Telegram images are intentionally downgraded to **text + attachment** before injection to avoid corrupting the session payload on the tested build.
+- Codex app conversation output is mirrored back to Telegram in real time.
 - Mirrored assistant responses preserve common Markdown-style formatting in Telegram.
 - Mirrored user/app echo stays plain text on purpose.
 
@@ -39,9 +40,9 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 ## Account behavior
 
 - This workflow assumes you already use the official Codex app normally.
-- Sign into the official app first with the same official ChatGPT Pro account you use on the web, then patch the local copy.
-- In this workflow, the Codex app is the surface where I instruct that same official web-side Pro account and receive results back.
-- The Telegram-driven path continues through that same signed-in app session and the same Pro-backed account entitlement.
+- Sign into the official app first, then patch the local copy.
+- If you use ChatGPT Pro on chatgpt.com, sign into the Codex app with that same account before patching.
+- The Telegram-driven path continues through that same signed-in app session.
 - Telegram is a control surface for that app session, not a replacement auth path.
 
 See [WINDOWS_OFFICIAL_APP_SETUP.md](WINDOWS_OFFICIAL_APP_SETUP.md) for the full setup flow.

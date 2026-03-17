@@ -1,6 +1,6 @@
 # codex-telegram
 
-Unofficial Telegram workflow for the Windows Codex app I actually use with my official ChatGPT Pro account: I instruct that same official web-side Pro account from the app and receive results back there, then patch a local copy so Telegram drives the same app session.
+Unofficial Telegram integration for the Windows Codex app: real-time message sync and Codex app commands from Telegram through a locally patched and re-registered copy.
 
 [Features](docs/FEATURES.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
@@ -16,19 +16,21 @@ This repository contains the patch source, workflow scripts, and setup docs for 
 
 This repository is built around the way I actually use Codex:
 
-- keep my Codex access on the same official ChatGPT Pro account I use on the web
-- use the Codex app as a surface for instructing that same official web-side Pro account and receiving results back through it
 - install the official Microsoft Store Codex app
-- sign into that app with the same official ChatGPT Pro account I normally use on chatgpt.com
 - confirm the official app works on its own before patching anything
 - patch and re-register a local copy of that official app so Telegram can drive the same app session
+- use Telegram for real-time message sync with the Codex app
+- use Telegram to trigger Codex app commands such as session, model, fast mode, reasoning, and permission controls
+
+Official web Pro note:
+
+- if you use ChatGPT Pro on chatgpt.com, sign into the Codex app with the same account before patching
 
 The important boundary is:
 
 - Telegram does **not** replace Codex auth with a separate backend
-- the Codex app is how I instruct the same official web-side ChatGPT Pro account and receive results back
 - Telegram drives that same locally running Codex app
-- that app still uses the same signed-in official ChatGPT Pro account, plan limits, and conversation state
+- that app keeps using its own signed-in account, plan limits, and conversation state
 
 ## Current workflow
 
@@ -66,9 +68,9 @@ Copy-Item .\examples\telegram-native.example.json "$env:APPDATA\\Codex\\telegram
 npm install
 ```
 
-4. Sign into the official Codex app first with the same official ChatGPT Pro account you use on the web, and make sure a normal Codex chat works.
+4. Sign into the official Codex app first and make sure a normal Codex chat works.
 
-This repo assumes that Pro-backed Codex access is coming from that same official ChatGPT account, so the Codex app is instructing that same web-side Pro account and receiving results back through it, not through a separate Telegram-only account path.
+If you use ChatGPT Pro on chatgpt.com, sign into the Codex app with that same account before patching.
 
 5. Prepare the patched official-app workspace from the currently installed Microsoft Store package:
 
@@ -117,7 +119,7 @@ Portable-specific helpers still exist in `scripts/` as archived reference. The s
 - mirrored user/app echo stays plain text on purpose
 - Telegram images are still downgraded to **text + attachment** before injection for payload safety
 
-That means the Telegram side is using the same signed-in Codex app to reach the same official ChatGPT Pro account you already use on the web, not a separate Codex account path.
+That means the Telegram side is using the same signed-in Codex app you already use, not a separate Codex account path.
 
 Full command reference: [docs/TELEGRAM_COMMANDS.md](docs/TELEGRAM_COMMANDS.md)
 
