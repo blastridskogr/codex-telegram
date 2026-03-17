@@ -42,6 +42,7 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 - This workflow assumes you already use the official Codex app normally.
 - Sign into the official app first, then patch the local copy.
 - If you use ChatGPT Pro on chatgpt.com, sign into the Codex app with that same account before patching.
+- On the official website, ChatGPT Pro also includes Codex and ChatGPT agent; use `agent mode` or `/agent` there if you want the official web flow.
 - The Telegram-driven path continues through that same signed-in app session.
 - Telegram is a control surface for that app session, not a replacement auth path.
 

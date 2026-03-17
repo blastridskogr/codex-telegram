@@ -27,6 +27,20 @@ Before patching anything:
 
 If you use ChatGPT Pro on chatgpt.com, sign into the official app with that same account before continuing.
 
+Official website note:
+
+- ChatGPT Pro also includes Codex and ChatGPT agent on the official website
+- to use that official website flow, open ChatGPT, choose `agent mode` from the tools menu or type `/agent`, then describe the task you want done
+- ChatGPT agent can use a browser and terminal during the task
+- optional local Chrome CLI example from my setup:
+
+```powershell
+node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js launch
+node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js status --json
+```
+
+- after `https://chatgpt.com/` is open in that Chrome session, switch the page to `agent mode` or type `/agent`
+
 ## 1. Install repository dependencies
 
 ```powershell

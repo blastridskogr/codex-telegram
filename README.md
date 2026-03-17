@@ -25,6 +25,25 @@ This repository is built around the way I actually use Codex:
 Official web Pro note:
 
 - if you use ChatGPT Pro on chatgpt.com, sign into the Codex app with the same account before patching
+- on the official website, ChatGPT Pro also includes Codex and ChatGPT agent
+- to use that official website flow, open ChatGPT, choose `agent mode` from the tools menu or type `/agent`, then describe the task you want done; ChatGPT agent can use a browser and terminal during the task
+
+Optional local Chrome CLI example:
+
+- my local Chrome CLI lives outside this repo at `C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js`
+- launch the dedicated Chrome session:
+
+```powershell
+node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js launch
+```
+
+- verify that the logged-in official site is open:
+
+```powershell
+node C:\skogr_project\game_analysis\tools\chrome_chatgpt_cli\chrome_chatgpt_cli.js status --json
+```
+
+- once `https://chatgpt.com/` is open in that Chrome session, switch the page to `agent mode` or type `/agent`, then use the official website agent there
 
 The important boundary is:
 
