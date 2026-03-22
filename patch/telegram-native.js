@@ -666,7 +666,10 @@ function extractSessionIdFromName(fileName) {
     return match ? match[1] : null;
 }
 
-function readFileTailUtf8(filePath, maxBytes = 64 * 1024) {
+const SESSION_CATALOG_HEAD_BYTES = 256 * 1024;
+const SESSION_CATALOG_TAIL_BYTES = 256 * 1024;
+
+function readFileTailUtf8(filePath, maxBytes = SESSION_CATALOG_TAIL_BYTES) {
     const stats = fs.statSync(filePath);
     const length = Math.min(stats.size, maxBytes);
     const buffer = Buffer.alloc(length);
@@ -679,7 +682,7 @@ function readFileTailUtf8(filePath, maxBytes = 64 * 1024) {
     return buffer.toString("utf8");
 }
 
-function readFileHeadUtf8(filePath, maxBytes = 64 * 1024) {
+function readFileHeadUtf8(filePath, maxBytes = SESSION_CATALOG_HEAD_BYTES) {
     const stats = fs.statSync(filePath);
     const length = Math.min(stats.size, maxBytes);
     const buffer = Buffer.alloc(length);
@@ -819,15 +822,23 @@ function buildSessionReplaySelection(history) {
 
 function extractPreviewFromSessionTail(tail) {
     const lines = tail.split(/\r?\n/).filter(Boolean).reverse();
+    let fallback = "";
     for (const line of lines) {
         try {
-            const text = extractSessionText(JSON.parse(line));
+            const parsed = JSON.parse(line);
+            const text = extractSessionText(parsed);
             if (text) {
                 return truncatePreview(text);
             }
+            if (!fallback) {
+                const entry = extractHistoryEntry(parsed);
+                if (entry?.text) {
+                    fallback = entry.text;
+                }
+            }
         } catch {}
     }
-    return "(no preview)";
+    return truncatePreview(fallback);
 }
 
 function buildSandboxPolicy(kind, workspaceRoots) {
