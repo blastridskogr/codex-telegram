@@ -549,8 +549,18 @@ function extractImageUrls(content) {
         return [];
     }
     return content
-        .filter((part) => part && part.type === "image" && part.url)
-        .map((part) => String(part.url).trim())
+        .map((part) => {
+            if (!part) {
+                return null;
+            }
+            if (part.type === "image" && part.url) {
+                return String(part.url).trim();
+            }
+            if (part.type === "localImage" && part.path) {
+                return String(part.path).trim();
+            }
+            return null;
+        })
         .filter(Boolean);
 }
 
@@ -577,14 +587,37 @@ function normalizeFilePathFromUrl(urlValue) {
     return null;
 }
 
-function buildSafeImageTurnPayload(staged, caption) {
-    const prompt = caption
-        ? `${caption}\n\n[Telegram image file: ${staged.filePath}]`
-        : `Analyze the Telegram image file saved at ${staged.filePath}.`;
+function extractInputImageRefs(input) {
+    if (!Array.isArray(input)) {
+        return [];
+    }
+    return input
+        .map((item) => {
+            if (!item) {
+                return null;
+            }
+            if (item.type === "image" && item.url) {
+                return String(item.url).trim();
+            }
+            if (item.type === "localImage" && item.path) {
+                return String(item.path).trim();
+            }
+            return null;
+        })
+        .filter(Boolean);
+}
+
+function buildNativeImageTurnPayload(staged, caption) {
+    const prompt = String(caption || "").trim();
+    const input = [];
+    if (prompt) {
+        input.push({ type: "text", text: prompt, text_elements: [] });
+    }
+    input.push({ type: "localImage", path: staged.filePath });
     return {
         prompt,
-        input: [{ type: "text", text: prompt, text_elements: [] }],
-        attachments: [{ label: staged.fileName, path: staged.filePath, fsPath: staged.filePath }],
+        input,
+        attachments: [],
     };
 }
 
@@ -793,26 +826,69 @@ function shouldTreatAsReplayResult(entry, preferTaskComplete = false) {
     return !!entry?.isFinalSummary || entry?.phase === "final_answer";
 }
 
+function buildReplayFallbackResultEntry(entries) {
+    const assistantEntries = Array.isArray(entries)
+        ? entries.filter((entry) => entry?.role === "assistant" && entry?.text)
+        : [];
+    if (!assistantEntries.length) {
+        return null;
+    }
+    if (assistantEntries.length === 1) {
+        return assistantEntries[0];
+    }
+    const lastEntry = assistantEntries[assistantEntries.length - 1];
+    return {
+        ...lastEntry,
+        text: assistantEntries
+            .map((entry) => String(entry?.text || "").trim())
+            .filter(Boolean)
+            .join("\n\n")
+            .trim(),
+        phase: "commentary_block",
+    };
+}
+
 function buildSessionReplaySelection(history) {
     const groups = [];
     const pendingUserEntries = [];
+    const pendingAssistantEntries = [];
     const preferTaskComplete = (history || []).some((entry) => entry?.isFinalSummary);
+    const flushPartialGroup = () => {
+        const resultEntry = buildReplayFallbackResultEntry(pendingAssistantEntries);
+        if (!pendingUserEntries.length || !resultEntry) {
+            return false;
+        }
+        groups.push({
+            userEntries: pendingUserEntries.splice(0, pendingUserEntries.length),
+            resultEntry,
+            isPartial: true,
+        });
+        pendingAssistantEntries.splice(0, pendingAssistantEntries.length);
+        return true;
+    };
     for (const entry of history || []) {
         if (entry?.role === "user") {
+            if (pendingUserEntries.length && pendingAssistantEntries.length) {
+                flushPartialGroup();
+            }
             pendingUserEntries.push(entry);
             continue;
         }
-        if (!shouldTreatAsReplayResult(entry, preferTaskComplete)) {
+        if (entry?.role !== "assistant" || !pendingUserEntries.length) {
             continue;
         }
-        if (!pendingUserEntries.length) {
+        if (!shouldTreatAsReplayResult(entry, preferTaskComplete)) {
+            pendingAssistantEntries.push(entry);
             continue;
         }
         groups.push({
             userEntries: pendingUserEntries.splice(0, pendingUserEntries.length),
             resultEntry: entry,
+            isPartial: false,
         });
+        pendingAssistantEntries.splice(0, pendingAssistantEntries.length);
     }
+    flushPartialGroup();
     return {
         groups: groups
             .filter((group) => Array.isArray(group?.userEntries) && group.userEntries.length && group?.resultEntry)
@@ -1649,6 +1725,14 @@ class TelegramApi {
         return this.call("sendMessage", payload);
     }
 
+    editMessageReplyMarkup(chatId, messageId, replyMarkup = null) {
+        const payload = { chat_id: chatId, message_id: messageId };
+        if (replyMarkup != null) {
+            payload.reply_markup = replyMarkup;
+        }
+        return this.call("editMessageReplyMarkup", payload);
+    }
+
     sendTyping(chatId) {
         return this.call("sendChatAction", { chat_id: chatId, action: "typing" });
     }
@@ -2016,9 +2100,7 @@ class AppBroadcastMonitor {
         const useBoundTurnBridge = typeof this.config.submitBoundThreadTurn === "function";
         const suppressionMessage = {
             text: String(turnPayload?.prompt || "").trim(),
-            images: Array.isArray(turnPayload?.input)
-                ? turnPayload.input.filter((item) => item?.type === "image").map((item) => item.url)
-                : [],
+            images: extractInputImageRefs(turnPayload?.input),
             attachments: Array.isArray(turnPayload?.attachments) ? turnPayload.attachments : [],
         };
         const deliveryFingerprint = buildMirrorFingerprint(suppressionMessage);
@@ -2444,6 +2526,20 @@ class CodexAppDirectCompanion {
         }
     }
 
+    async safeClearCallbackMarkup(chatId, messageId, context = "callback_markup_clear") {
+        if (!chatId || messageId == null) {
+            return false;
+        }
+        try {
+            await this.api.editMessageReplyMarkup(chatId, messageId);
+            return true;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.warn(`editMessageReplyMarkup failed context=${context} error=${message}`);
+            return false;
+        }
+    }
+
     buildMainControlsMessage(chatId) {
         return {
             text: `Codex controls\n\n${this.formatSettingsSummary(chatId)}`,
@@ -2531,7 +2627,7 @@ class CodexAppDirectCompanion {
 
         const suppressionMessage = {
             text: String(turnPayload?.prompt || "").trim(),
-            images: input.filter((item) => item?.type === "image").map((item) => item.url),
+            images: extractInputImageRefs(input),
             attachments,
         };
         this.monitor.suppressNextUserMessage(conversationId, buildMirrorFingerprint(suppressionMessage));
@@ -2686,16 +2782,20 @@ class CodexAppDirectCompanion {
     buildSessionReplayHeader(sessionInfo, history, { replayedAt = new Date() } = {}) {
         const replay = buildSessionReplaySelection(history, replayedAt);
         const userEntryCount = (replay.groups || []).reduce((sum, group) => sum + ((group?.userEntries || []).length), 0);
-        const completedGroupCount = (replay.groups || []).filter((group) => group?.resultEntry).length;
+        const completedGroupCount = (replay.groups || []).filter((group) => group?.resultEntry && !group?.isPartial).length;
+        const partialGroupCount = (replay.groups || []).filter((group) => group?.isPartial).length;
         const lines = [
             `# ${sessionInfo?.title || "(untitled session)"}`,
             `Session ID: ${sessionInfo?.sessionId || "-"}`,
             `Last activity: ${sessionInfo?.modifiedAt ? formatSessionTimestamp(sessionInfo.modifiedAt) : "-"}`,
             `Messages: ${history.length}`,
-            `Replay count: latest ${DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT} completed instruction/result pairs`,
-            "Replay order: chronological (oldest to newest within the selected latest pairs)",
+            `Replay count: latest ${DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT} instruction/result groups`,
+            "Replay order: chronological (oldest to newest within the selected latest groups)",
         ];
-        lines.push(`Replaying ${userEntryCount} user messages across ${completedGroupCount} completed instruction/result groups.`);
+        lines.push(`Replaying ${userEntryCount} user messages across ${completedGroupCount} completed and ${partialGroupCount} partial instruction/result groups.`);
+        if (partialGroupCount) {
+            lines.push("Partial groups use the newest assistant progress/commentary block when no completed result was stored yet.");
+        }
         return {
             header: lines.join("\n"),
             groups: replay.groups,
@@ -2759,7 +2859,7 @@ class CodexAppDirectCompanion {
         }
     }
 
-    async bindChatToSession(chatId, sessionId, callbackId = null) {
+    async bindChatToSession(chatId, sessionId, callbackId = null, callbackMessageId = null) {
         await this.safeAnswerCallbackQuery(callbackId, "Opening session", `bind_session:${sessionId}`);
         const previousSessionId = this.bindings.getSession(chatId) || null;
         const result = this.bindings.bind(chatId, sessionId);
@@ -2784,8 +2884,9 @@ class CodexAppDirectCompanion {
         }
 
         this.pendingNewThread.clear(chatId);
-        await this.refreshChatSettingsFromApp(chatId, "bind_session");
+        await this.safeClearCallbackMarkup(chatId, callbackMessageId, `bind_session:${sessionId}`);
         await this.sendSessionHistory(chatId, sessionId);
+        void this.refreshChatSettingsFromApp(chatId, "bind_session");
         return result;
     }
 
@@ -2838,16 +2939,16 @@ class CodexAppDirectCompanion {
         const photo = getTelegramPhotoVariant(message?.photo);
         if (photo?.file_id) {
             const staged = await this.stageTelegramFile(photo.file_id, `telegram-photo-${photo.file_unique_id || photo.file_id}.jpg`);
-            this.logger.warn(`downgrading telegram photo to text+attachment file=${staged.filePath}`);
-            return buildSafeImageTurnPayload(staged, caption);
+            this.logger.info(`mapping telegram photo to app-native localImage input file=${staged.filePath}`);
+            return buildNativeImageTurnPayload(staged, caption);
         }
 
         const document = message?.document;
         if (document?.file_id) {
             const staged = await this.stageTelegramFile(document.file_id, document.file_name || `telegram-document-${document.file_unique_id || document.file_id}`);
             if (isImageDocument(document)) {
-                this.logger.warn(`downgrading telegram image document to text+attachment file=${staged.filePath}`);
-                return buildSafeImageTurnPayload(staged, caption);
+                this.logger.info(`mapping telegram image document to app-native localImage input file=${staged.filePath}`);
+                return buildNativeImageTurnPayload(staged, caption);
             }
             const prompt = caption || "Check the attached file.";
             return {
@@ -2942,6 +3043,7 @@ class CodexAppDirectCompanion {
         const callbackId = callback?.id;
         const data = String(callback?.data || "").trim();
         const chatId = String(callback?.message?.chat?.id || "");
+        const callbackMessageId = Number(callback?.message?.message_id || 0) || null;
         if (!callbackId || !chatId) {
             return;
         }
@@ -2965,7 +3067,7 @@ class CodexAppDirectCompanion {
         }
         if (data.startsWith("session:")) {
             const sessionId = data.slice("session:".length).trim();
-            await this.bindChatToSession(chatId, sessionId, callbackId);
+            await this.bindChatToSession(chatId, sessionId, callbackId, callbackMessageId);
             return;
         }
         if (!data.startsWith("set:")) {
@@ -2976,7 +3078,7 @@ class CodexAppDirectCompanion {
         const [, kind, rawValue] = data.split(":");
         if (kind === "session") {
             const sessionId = String(rawValue || "").trim();
-            await this.bindChatToSession(chatId, sessionId, callbackId);
+            await this.bindChatToSession(chatId, sessionId, callbackId, callbackMessageId);
             return;
         }
 
@@ -3202,7 +3304,7 @@ class CodexAppDirectCompanion {
         this.pendingNewThread.clear(chatId);
         const suppressionMessage = {
             text: turnPayload.prompt,
-            images: turnPayload.input.filter((item) => item?.type === "image").map((item) => item.url),
+            images: extractInputImageRefs(turnPayload.input),
             attachments: turnPayload.attachments,
         };
         this.monitor.suppressNextUserMessage(sessionId, buildMirrorFingerprint(suppressionMessage));

@@ -54,11 +54,11 @@ The current supported path is:
 - re-register a local `OpenAI.Codex` package copy and launch it
 - if the Store update path is blocked by the local dev registration, recover by reinstalling the official Store package first and then reapplying the Telegram patch
 
-Verified baseline on 2026-03-17:
+Verified baseline on 2026-03-22:
 
 - Windows 11
 - Microsoft Store Codex source package `26.313.5234.0`
-- Telegram-patched registered package `26.313.5234.4`
+- Telegram-patched registered package `26.313.5234.9`
 - Node.js 24+
 - PowerShell 5.1+
 
@@ -123,11 +123,12 @@ Portable-specific helpers still exist in `scripts/` as archived reference. The s
 
 - `/codex_new` opens the real native new-thread flow. The first Telegram message after that creates the real thread and auto-binds the returned session id.
 - `/codex_bind` and `/codex_session` submit follow-up text into the bound thread through the app-native path.
+- `/codex_session` replays the latest 5 instruction/result groups, oldest-to-newest inside that latest set. Completed results stay preferred, and the newest commentary-only work block can replay as a partial group instead of disappearing.
 - `/codex_model`, `/codex_fast`, `/codex_reasoning`, `/codex_permission`, and `/codex_current` use app-native control or state paths.
 - `/codex_sandbox` is no longer advertised. It only redirects to `/codex_permission` for compatibility.
 - mirrored assistant responses preserve common Markdown formatting in Telegram
 - mirrored user/app echo stays plain text on purpose
-- Telegram images are still downgraded to **text + attachment** before injection for payload safety
+- Telegram images are staged locally and sent through the app-native local-image input path
 
 That means the Telegram side is using the same signed-in Codex app you already use, not a separate Codex account path.
 

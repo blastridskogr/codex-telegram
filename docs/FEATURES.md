@@ -16,13 +16,13 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 - `/codex_new` opens the real Codex new-thread flow.
 - The first Telegram message after `/codex_new` creates the real thread and auto-binds the returned `conversationId`.
 - Follow-up text on a bound session goes through the app-native follow-up submit path, so plain Telegram replies after `/codex_bind` or `/codex_session` reach the real thread.
-- Session switching mirrors only the latest 5 completed instruction/result pairs, oldest-to-newest inside that latest set.
+- Session switching mirrors the latest 5 instruction/result groups, oldest-to-newest inside that latest set. Completed results stay preferred, and a newer commentary-only work block can replay as a partial group instead of disappearing.
 
 ## Message and media behavior
 
 - Plain Telegram text is injected as a Codex user turn.
 - Telegram documents are staged locally and passed as attachments.
-- Telegram images are intentionally downgraded to **text + attachment** before injection to avoid corrupting the session payload on the tested build.
+- Telegram images are staged locally and injected through the app-native local-image input path.
 - Codex app conversation output is mirrored back to Telegram in real time.
 - Mirrored assistant responses preserve common Markdown-style formatting in Telegram.
 - Mirrored user/app echo stays plain text on purpose.
@@ -58,7 +58,7 @@ See [SECURITY.md](SECURITY.md) for publish rules and token-handling guidance.
 
 ## Current limits
 
-- Verified against the 2026-03-17 Microsoft Store source package `26.313.5234.0`, re-registered locally as package `26.313.5234.4`.
+- Verified against the 2026-03-22 Microsoft Store source package `26.313.5234.0`, re-registered locally as package `26.313.5234.9`.
 - The patcher depends on the current minified renderer and main bundle anchors.
 - If OpenAI changes the bundle shape, the patch scripts may need updates.
 - The live replace step intentionally stops the running Codex app and re-registers the local package copy.

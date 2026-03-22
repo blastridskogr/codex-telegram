@@ -41,7 +41,8 @@ Behavior:
 - after `/codex_bind` or `/codex_session`, plain Telegram follow-up text is submitted through the app-native bound-thread follow-up path
 - bind/switch actions open the real Codex conversation in the app before Telegram treats the binding as live
 - the picker shows `session title + session id + last activity`
-- when you switch sessions, only the latest 5 completed instruction/result pairs are mirrored back into Telegram as display-only chat output, oldest-to-newest within that latest set
+- when you switch sessions, the latest 5 instruction/result groups are mirrored back into Telegram as display-only chat output, oldest-to-newest within that latest set
+- completed results stay preferred, but a newer assistant progress/commentary block can replay as a partial group when no final summary has been stored yet
 - the history replay does **not** cost extra model tokens
 
 ## Model controls
@@ -102,6 +103,6 @@ This reads the live injected app state when the renderer bridge is available, in
 
 - text messages: injected into the bound Codex session
 - documents: injected as attachments
-- images: currently downgraded to `text + attachment` for safety
+- images: staged locally and injected through the app-native local-image input path
 - mirrored assistant responses preserve common Markdown features such as headings, bold text, inline code, fenced code blocks, links, and blockquotes in Telegram
 - mirrored user/app echo stays plain text on purpose so only Codex output is reformatted
