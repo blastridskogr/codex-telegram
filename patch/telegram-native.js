@@ -20,6 +20,7 @@ const DEFAULT_IPC_RETRY_DELAY_MS = 500;
 const DEFAULT_TURN_INJECT_RETRY_COUNT = 3;
 const DEFAULT_TURN_INJECT_RETRY_DELAY_MS = 900;
 const DEFAULT_TURN_DELIVERY_ACK_TIMEOUT_MS = 17000;
+const DEFAULT_APPROVAL_SYNC_DELAY_MS = 400;
 const DEFAULT_LABEL = "Default";
 const DEFAULT_PERMISSION_LABEL = "Basic permission";
 const FAST_OPTIONS = [
@@ -618,6 +619,78 @@ function buildNativeImageTurnPayload(staged, caption) {
         prompt,
         input,
         attachments: [],
+    };
+}
+
+function truncatePlainText(text, limit = 500) {
+    const normalized = String(text || "").trim().replace(/\s+/g, " ");
+    if (normalized.length <= limit) {
+        return normalized;
+    }
+    return `${normalized.slice(0, Math.max(0, limit - 3))}...`;
+}
+
+function summarizeApprovalField(value, limit = 500) {
+    if (value == null) {
+        return "";
+    }
+    if (typeof value === "string") {
+        return truncatePlainText(value, limit);
+    }
+    return truncatePlainText(safeJsonStringify(value), limit);
+}
+
+function normalizePendingApproval(raw, conversationId = null) {
+    if (!raw || typeof raw !== "object") {
+        return null;
+    }
+    const approvalRequestId = String(raw.approvalRequestId || "").trim();
+    if (!approvalRequestId) {
+        return null;
+    }
+    const type = String(raw.type || "").trim().toLowerCase() === "patch" ? "patch" : "exec";
+    const networkApprovalContext = raw.networkApprovalContext && typeof raw.networkApprovalContext === "object"
+        ? {
+            host: raw.networkApprovalContext.host != null ? String(raw.networkApprovalContext.host) : null,
+        }
+        : null;
+    const proposedNetworkPolicyAmendments = Array.isArray(raw.proposedNetworkPolicyAmendments)
+        ? raw.proposedNetworkPolicyAmendments
+            .filter((entry) => entry && typeof entry === "object")
+            .map((entry) => ({
+                action: entry.action != null ? String(entry.action) : null,
+                host: entry.host != null ? String(entry.host) : null,
+                hostPattern: entry.hostPattern != null ? String(entry.hostPattern) : null,
+            }))
+        : [];
+    const changes = raw.changes && typeof raw.changes === "object"
+        ? { ...raw.changes }
+        : null;
+    return {
+        conversationId: raw.conversationId != null ? String(raw.conversationId) : (conversationId != null ? String(conversationId) : null),
+        approvalRequestId,
+        callId: raw.callId != null ? String(raw.callId) : null,
+        type,
+        approvalReason: raw.approvalReason != null ? String(raw.approvalReason) : null,
+        command: raw.command != null ? String(raw.command) : null,
+        networkApprovalContext,
+        proposedExecpolicyAmendment: raw.proposedExecpolicyAmendment ?? null,
+        proposedNetworkPolicyAmendments,
+        changes,
+        grantRoot: raw.grantRoot != null ? String(raw.grantRoot) : null,
+        allowForSession: type === "exec"
+            && proposedNetworkPolicyAmendments.some((entry) => String(entry?.action || "").trim().toLowerCase() === "allow"),
+    };
+}
+
+function parseApprovalCallbackData(data) {
+    const match = /^approval:(acceptForSession|accept|decline):(.+)$/.exec(String(data || "").trim());
+    if (!match) {
+        return null;
+    }
+    return {
+        decision: match[1],
+        approvalRequestId: match[2],
     };
 }
 
@@ -2277,6 +2350,15 @@ class AppBroadcastMonitor {
     }
 
     async processSnapshot(chatId, conversationId, conversationState) {
+        if (typeof this.config.onConversationActivity === "function") {
+            Promise.resolve(this.config.onConversationActivity({
+                chatId: String(chatId),
+                conversationId,
+                conversationState,
+            })).catch((error) => {
+                this.logger.warn(`approval sync scheduling failed session=${conversationId} error=${String(error?.message || error)}`);
+            });
+        }
         const messages = flattenConversationMessages(conversationState);
         let delivered = this.knownItemIds.get(conversationId);
         if (!delivered) {
@@ -2330,6 +2412,10 @@ class CodexAppDirectCompanion {
         this.pendingNewThread = new PendingNewThreadStore(path.join(config.stateDir, DEFAULT_PENDING_NEW_THREAD_FILE));
         this.modelCatalog = new ModelCatalog(config.codexHome, logger);
         this.catalog = new SessionCatalog(config.codexHome, logger);
+        this.pendingApprovals = new Map();
+        this.pendingApprovalSyncTimers = new Map();
+        this.pendingApprovalSyncs = new Map();
+        this.config.onConversationActivity = ({ chatId: activityChatId, conversationId }) => this.scheduleApprovalSync(activityChatId, conversationId, "activity");
         this.monitor = new AppBroadcastMonitor(this.api, this.bindings, config, logger);
         this.offset = null;
         this.disposed = false;
@@ -2540,6 +2626,192 @@ class CodexAppDirectCompanion {
         }
     }
 
+    buildApprovalPrompt(chatId, approval) {
+        const lines = ["Codex approval requested."];
+        if (approval.type === "patch") {
+            lines.push("Type: File changes");
+        } else if (approval.networkApprovalContext?.host) {
+            lines.push(`Type: Network access`);
+            lines.push(`Host: ${approval.networkApprovalContext.host}`);
+        } else {
+            lines.push("Type: Command execution");
+        }
+        if (approval.approvalReason) {
+            lines.push(`Reason: ${truncatePlainText(approval.approvalReason, 500)}`);
+        }
+        const commandSummary = summarizeApprovalField(approval.command || approval.proposedExecpolicyAmendment, 700);
+        if (commandSummary) {
+            lines.push(`Command: ${commandSummary}`);
+        }
+        if (approval.type === "patch" && approval.changes) {
+            const fileNames = Object.keys(approval.changes).filter(Boolean);
+            if (fileNames.length) {
+                lines.push(`Files: ${fileNames.slice(0, 6).join(", ")}${fileNames.length > 6 ? ` (+${fileNames.length - 6} more)` : ""}`);
+            }
+        }
+        if (approval.grantRoot) {
+            lines.push(`Root: ${approval.grantRoot}`);
+        }
+        lines.push("");
+        lines.push("Choose Approve or Reject below.");
+        return lines.join("\n\n");
+    }
+
+    buildApprovalReplyMarkup(approval) {
+        const buttons = [];
+        if (approval.type === "exec" && approval.allowForSession) {
+            buttons.push(
+                [
+                    { text: "Approve once", callback_data: `approval:accept:${approval.approvalRequestId}` },
+                    { text: "Allow session", callback_data: `approval:acceptForSession:${approval.approvalRequestId}` },
+                ],
+                [
+                    { text: "Reject", callback_data: `approval:decline:${approval.approvalRequestId}` },
+                ],
+            );
+        } else {
+            buttons.push([
+                { text: "Approve", callback_data: `approval:accept:${approval.approvalRequestId}` },
+                { text: "Reject", callback_data: `approval:decline:${approval.approvalRequestId}` },
+            ]);
+        }
+        return { inline_keyboard: buttons };
+    }
+
+    async clearPendingApproval(chatId, context = "approval_clear") {
+        const current = this.pendingApprovals.get(chatId) || null;
+        if (!current) {
+            return false;
+        }
+        this.pendingApprovals.delete(chatId);
+        if (current.messageId != null) {
+            await this.safeClearCallbackMarkup(chatId, current.messageId, context);
+        }
+        return true;
+    }
+
+    scheduleApprovalSync(chatId, conversationId, reason = "activity") {
+        if (!chatId || !conversationId || typeof this.config.getCurrentAppState !== "function") {
+            return;
+        }
+        const key = String(chatId);
+        const existing = this.pendingApprovalSyncTimers.get(key);
+        if (existing) {
+            clearTimeout(existing);
+        }
+        const timeoutHandle = setTimeout(() => {
+            this.pendingApprovalSyncTimers.delete(key);
+            this.syncPendingApproval(chatId, conversationId, reason).catch((error) => {
+                const message = error instanceof Error ? error.message : String(error);
+                this.logger.warn(`syncPendingApproval failed chat=${chatId} session=${conversationId} reason=${reason} error=${message}`);
+            });
+        }, DEFAULT_APPROVAL_SYNC_DELAY_MS);
+        this.pendingApprovalSyncTimers.set(key, timeoutHandle);
+    }
+
+    async syncPendingApproval(chatId, conversationId, reason = "activity") {
+        if (!chatId || !conversationId || typeof this.config.getCurrentAppState !== "function") {
+            return null;
+        }
+        const key = String(chatId);
+        const previous = this.pendingApprovalSyncs.get(key) || Promise.resolve();
+        const run = previous.catch(() => {}).then(async () => {
+            const activeTarget = this.getNativeConversationTarget(chatId);
+            if (!activeTarget?.conversationId || activeTarget.conversationId !== conversationId) {
+                return null;
+            }
+            const state = await this.config.getCurrentAppState({
+                conversationId,
+                reason: `approval_${reason}`,
+                skipNavigation: reason === "activity",
+                timeoutMs: 10000,
+            }).catch((error) => {
+                const message = error instanceof Error ? error.message : String(error);
+                this.logger.warn(`approval current-state failed chat=${chatId} session=${conversationId} reason=${reason} error=${message}`);
+                return null;
+            });
+            const approval = normalizePendingApproval(state?.pendingApproval ?? null, conversationId);
+            const current = this.pendingApprovals.get(chatId) || null;
+            if (!approval) {
+                if (current) {
+                    await this.clearPendingApproval(chatId, `approval_resolved:${conversationId}`);
+                }
+                return null;
+            }
+            if (current && current.approvalRequestId === approval.approvalRequestId && current.conversationId === conversationId) {
+                return current;
+            }
+            if (current) {
+                await this.clearPendingApproval(chatId, `approval_replace:${conversationId}`);
+            }
+            const sent = await this.api.sendMessageWithMarkup(
+                chatId,
+                this.buildApprovalPrompt(chatId, approval),
+                this.buildApprovalReplyMarkup(approval),
+            );
+            const pending = {
+                ...approval,
+                messageId: Number(sent?.message_id || 0) || null,
+            };
+            this.pendingApprovals.set(chatId, pending);
+            this.logger.info(`approval relayed chat=${chatId} session=${conversationId} approval=${approval.approvalRequestId} type=${approval.type}`);
+            return pending;
+        });
+        this.pendingApprovalSyncs.set(key, run);
+        try {
+            return await run;
+        } finally {
+            if (this.pendingApprovalSyncs.get(key) === run) {
+                this.pendingApprovalSyncs.delete(key);
+            }
+        }
+    }
+
+    async handleApprovalCallback(chatId, callbackId, callbackMessageId, data) {
+        const parsed = parseApprovalCallbackData(data);
+        if (!parsed) {
+            await this.safeAnswerCallbackQuery(callbackId, "Unknown approval action.", "approval_unknown");
+            return;
+        }
+        const current = this.pendingApprovals.get(chatId) || null;
+        if (!current) {
+            await this.safeAnswerCallbackQuery(callbackId, "Approval already resolved.", "approval_missing");
+            await this.safeClearCallbackMarkup(chatId, callbackMessageId, "approval_missing");
+            return;
+        }
+        if (current.approvalRequestId !== parsed.approvalRequestId) {
+            await this.safeAnswerCallbackQuery(callbackId, "Approval is stale.", "approval_stale");
+            await this.safeClearCallbackMarkup(chatId, callbackMessageId, "approval_stale");
+            return;
+        }
+        if (typeof this.config.respondToApproval !== "function") {
+            await this.safeAnswerCallbackQuery(callbackId, "Approval relay unavailable.", "approval_unavailable");
+            await this.api.sendMessage(chatId, "This build cannot respond to Codex approvals yet.");
+            return;
+        }
+        await this.safeAnswerCallbackQuery(callbackId, "Applying approval", `approval_apply:${parsed.decision}`);
+        try {
+            await this.config.respondToApproval({
+                conversationId: current.conversationId,
+                approvalRequestId: current.approvalRequestId,
+                decision: parsed.decision,
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(`respondToApproval failed chat=${chatId} session=${current.conversationId} approval=${current.approvalRequestId} error=${message}`);
+            await this.api.sendMessage(chatId, `Failed to apply approval.\n\n${message}`);
+            return;
+        }
+        await this.clearPendingApproval(chatId, `approval_applied:${current.approvalRequestId}`);
+        const resultLabel = parsed.decision === "decline"
+            ? "Rejected."
+            : parsed.decision === "acceptForSession"
+                ? "Allowed for this conversation."
+                : "Approved.";
+        await this.api.sendMessage(chatId, resultLabel);
+        this.scheduleApprovalSync(chatId, current.conversationId, "post_decision");
+    }
+
     buildMainControlsMessage(chatId) {
         return {
             text: `Codex controls\n\n${this.formatSettingsSummary(chatId)}`,
@@ -2577,6 +2849,7 @@ class CodexAppDirectCompanion {
         if (currentSessionId) {
             this.bindings.unbind(chatId);
         }
+        await this.clearPendingApproval(chatId, "open_new_thread");
         this.pendingNewThread.set(chatId, {
             prompt: normalizedPrompt,
             cwd: preferredCwd,
@@ -2623,7 +2896,9 @@ class CodexAppDirectCompanion {
 
         this.pendingNewThread.clear(chatId);
         this.bindings.bind(chatId, conversationId);
+        await this.clearPendingApproval(chatId, "start_pending_new_thread");
         await this.refreshChatSettingsFromApp(chatId, "start_pending_new_thread");
+        this.scheduleApprovalSync(chatId, conversationId, "start_pending_new_thread");
 
         const suppressionMessage = {
             text: String(turnPayload?.prompt || "").trim(),
@@ -2884,9 +3159,11 @@ class CodexAppDirectCompanion {
         }
 
         this.pendingNewThread.clear(chatId);
+        await this.clearPendingApproval(chatId, `bind_session:${sessionId}`);
         await this.safeClearCallbackMarkup(chatId, callbackMessageId, `bind_session:${sessionId}`);
         await this.sendSessionHistory(chatId, sessionId);
         void this.refreshChatSettingsFromApp(chatId, "bind_session");
+        this.scheduleApprovalSync(chatId, sessionId, "bind_session");
         return result;
     }
 
@@ -3068,6 +3345,10 @@ class CodexAppDirectCompanion {
         if (data.startsWith("session:")) {
             const sessionId = data.slice("session:".length).trim();
             await this.bindChatToSession(chatId, sessionId, callbackId, callbackMessageId);
+            return;
+        }
+        if (data.startsWith("approval:")) {
+            await this.handleApprovalCallback(chatId, callbackId, callbackMessageId, data);
             return;
         }
         if (!data.startsWith("set:")) {
@@ -3263,6 +3544,7 @@ class CodexAppDirectCompanion {
         if (text === "/codex_unbind") {
             const result = this.bindings.unbind(chatId);
             this.pendingNewThread.clear(chatId);
+            await this.clearPendingApproval(chatId, "unbind");
             await this.api.sendMessage(chatId, result.message);
             return true;
         }
@@ -3362,6 +3644,11 @@ class CodexAppDirectCompanion {
             return;
         }
         this.disposed = true;
+        for (const timeoutHandle of this.pendingApprovalSyncTimers.values()) {
+            clearTimeout(timeoutHandle);
+        }
+        this.pendingApprovalSyncTimers.clear();
+        this.pendingApprovalSyncs.clear();
         await this.monitor.dispose().catch((error) => {
             this.logger.warn(`monitor dispose failed: ${error.message}`);
         });
@@ -3399,6 +3686,9 @@ async function bootWithConfigPath(configPath, options = {}) {
     }
     if (typeof options.submitBoundThreadTurn === "function") {
         config.submitBoundThreadTurn = options.submitBoundThreadTurn;
+    }
+    if (typeof options.respondToApproval === "function") {
+        config.respondToApproval = options.respondToApproval;
     }
     const logger = new OutputLogger(config.logPath);
     const app = new CodexAppDirectCompanion(config, logger);
@@ -3444,6 +3734,7 @@ async function startNativeTelegramBridge(options = {}) {
         setPermissionMode: options.setPermissionMode,
         getCurrentAppState: options.getCurrentAppState,
         submitBoundThreadTurn: options.submitBoundThreadTurn,
+        respondToApproval: options.respondToApproval,
     }).catch((error) => {
         appendBootstrapLog(`[start-error] ${formatError(error)}`);
         activeNativeStart = null;

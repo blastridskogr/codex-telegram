@@ -1,6 +1,6 @@
 # Windows official app setup
 
-This repository does not redistribute Codex binaries. It documents the Telegram integration workflow for Codex on Windows: patch and re-register a **local copy** of your Codex app so Telegram can sync messages with it in real time and use Codex app commands through the same signed-in app session.
+This repository does not redistribute Codex binaries. It documents the Telegram integration workflow for Codex on Windows: patch and re-register a **local copy** of your Codex app so Telegram can sync messages with it in real time, use Codex app commands, and answer runtime approvals through the same signed-in app session.
 
 That means the working pattern is:
 
@@ -8,6 +8,7 @@ That means the working pattern is:
 - make sure normal Codex chats work in the app first
 - patch and re-register a local copy
 - use Telegram for real-time message sync and Codex app command control
+- if Codex asks for a runtime approval during a Telegram-driven task, answer it from Telegram instead of switching back to the app
 
 ## Requirements
 

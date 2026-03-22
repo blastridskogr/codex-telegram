@@ -2,7 +2,7 @@
   "name": "codex-telegram",
   "private": true,
   "version": "0.1.0",
-  "description": "Unofficial Telegram integration for the Windows Codex app: real-time message sync and Codex app commands from Telegram through a locally patched copy.",
+  "description": "Unofficial Telegram integration for the Windows Codex app: real-time sync, app commands, and runtime approval handling from Telegram through a locally patched copy.",
   "scripts": {
     "official:update": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\run_official_telegram_update.ps1 -WorkspaceRoot .\\work\\official_app_update",
     "official:redeploy": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\redeploy_updated_official_telegram.ps1 -WorkspaceRoot .\\work\\official_app_update",

@@ -1,6 +1,6 @@
 # Features
 
-This project documents a Telegram-driven Codex workflow on Windows: patch and re-register a local Codex app copy so Telegram can sync messages with it in real time and control Codex app commands through the same signed-in app session.
+This project documents a Telegram-driven Codex workflow on Windows: patch and re-register a local Codex app copy so Telegram can sync messages with it in real time, control Codex app commands, and answer runtime approval prompts through the same signed-in app session.
 
 It does **not** replace Codex with a separate bot backend. Telegram drives the same patched desktop app process, the same Codex conversations, and the same signed-in app account path.
 
@@ -9,6 +9,7 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 - Telegram support is injected into the official Codex app process through patched main and renderer bundles.
 - `/codex_model`, `/codex_fast`, `/codex_reasoning`, `/codex_permission`, and `/codex_current` use app-native control or state paths instead of Telegram-only shadow state.
 - `/codex_sandbox` is not a second settings surface. It is only a compatibility redirect to `/codex_permission`.
+- runtime approval prompts are relayed into Telegram with inline approve or reject actions, so Telegram-driven work is not blocked by an approval UI that only exists inside the Codex app
 
 ## Session lifecycle
 
@@ -58,7 +59,7 @@ See [SECURITY.md](SECURITY.md) for publish rules and token-handling guidance.
 
 ## Current limits
 
-- Verified against the 2026-03-22 Microsoft Store source package `26.313.5234.0`, re-registered locally as package `26.313.5234.9`.
+- Verified against the 2026-03-22 Microsoft Store source package `26.313.5234.0`, re-registered locally as package `26.313.5234.10`.
 - The patcher depends on the current minified renderer and main bundle anchors.
 - If OpenAI changes the bundle shape, the patch scripts may need updates.
 - The live replace step intentionally stops the running Codex app and re-registers the local package copy.

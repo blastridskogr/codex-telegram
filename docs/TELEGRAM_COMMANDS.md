@@ -88,6 +88,13 @@ Supported values:
 - `Full access`
 - `Custom (config.toml)`
 
+## Runtime approvals
+
+- if a Telegram-driven task triggers a Codex runtime approval prompt, Telegram mirrors that prompt with inline buttons
+- execution approvals can offer `Approve once`, `Allow session`, or `Reject`, depending on what the app asks for
+- file-change approvals offer `Approve` or `Reject`
+- these buttons answer the real Codex app approval request; they are not a Telegram-only shadow state
+
 ## Current-state view
 
 - `/codex_current`

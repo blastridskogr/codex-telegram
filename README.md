@@ -1,6 +1,6 @@
 # codex-telegram
 
-Unofficial Telegram integration for the Windows Codex app: real-time message sync and Codex app commands from Telegram through a locally patched and re-registered copy.
+Unofficial Telegram integration for the Windows Codex app: real-time message sync, Codex app commands, and runtime approval handling from Telegram through a locally patched and re-registered copy.
 
 [Features](docs/FEATURES.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
@@ -21,6 +21,7 @@ This repository is built around this workflow:
 - patch and re-register a local copy of that official app so Telegram can drive the same app session
 - use Telegram for real-time message sync with the Codex app
 - use Telegram to trigger Codex app commands such as session, model, fast mode, reasoning, and permission controls
+- receive Codex runtime approval prompts in Telegram and answer them there
 
 Official web Pro note:
 
@@ -58,7 +59,7 @@ Verified baseline on 2026-03-22:
 
 - Windows 11
 - Microsoft Store Codex source package `26.313.5234.0`
-- Telegram-patched registered package `26.313.5234.9`
+- Telegram-patched registered package `26.313.5234.10`
 - Node.js 24+
 - PowerShell 5.1+
 
@@ -126,6 +127,7 @@ Portable-specific helpers still exist in `scripts/` as archived reference. The s
 - `/codex_session` replays the latest 5 instruction/result groups, oldest-to-newest inside that latest set. Completed results stay preferred, and the newest commentary-only work block can replay as a partial group instead of disappearing.
 - `/codex_model`, `/codex_fast`, `/codex_reasoning`, `/codex_permission`, and `/codex_current` use app-native control or state paths.
 - `/codex_sandbox` is no longer advertised. It only redirects to `/codex_permission` for compatibility.
+- if Codex asks for a runtime approval during a Telegram-driven task, Telegram now mirrors that approval prompt and lets you approve or reject it there
 - mirrored assistant responses preserve common Markdown formatting in Telegram
 - mirrored user/app echo stays plain text on purpose
 - Telegram images are staged locally and sent through the app-native local-image input path
