@@ -2415,7 +2415,6 @@ class CodexAppDirectCompanion {
         this.pendingApprovals = new Map();
         this.pendingApprovalSyncTimers = new Map();
         this.pendingApprovalSyncs = new Map();
-        this.config.onConversationActivity = ({ chatId: activityChatId, conversationId }) => this.scheduleApprovalSync(activityChatId, conversationId, "activity");
         this.monitor = new AppBroadcastMonitor(this.api, this.bindings, config, logger);
         this.offset = null;
         this.disposed = false;
@@ -2690,6 +2689,53 @@ class CodexAppDirectCompanion {
         return true;
     }
 
+    async applyPendingApprovalState(chatId, conversationId, approval, context = "approval_state") {
+        const current = this.pendingApprovals.get(chatId) || null;
+        if (!approval) {
+            if (current && (!conversationId || current.conversationId === conversationId)) {
+                await this.clearPendingApproval(chatId, `${context}_resolved:${conversationId || current.conversationId || "unknown"}`);
+            }
+            return null;
+        }
+        if (current && current.approvalRequestId === approval.approvalRequestId && current.conversationId === conversationId) {
+            return current;
+        }
+        if (current) {
+            await this.clearPendingApproval(chatId, `${context}_replace:${conversationId}`);
+        }
+        const sent = await this.api.sendMessageWithMarkup(
+            chatId,
+            this.buildApprovalPrompt(chatId, approval),
+            this.buildApprovalReplyMarkup(approval),
+        );
+        const pending = {
+            ...approval,
+            messageId: Number(sent?.message_id || 0) || null,
+        };
+        this.pendingApprovals.set(chatId, pending);
+        this.logger.info(`approval relayed chat=${chatId} session=${conversationId} approval=${approval.approvalRequestId} type=${approval.type} source=${context}`);
+        return pending;
+    }
+
+    async handleApprovalStatePush(payload) {
+        const raw = payload && typeof payload === "object" ? payload : null;
+        const conversationId = raw?.conversationId != null ? String(raw.conversationId) : null;
+        if (!conversationId) {
+            return false;
+        }
+        const chatId = this.bindings.getChatIdForSession(conversationId);
+        if (!chatId) {
+            return false;
+        }
+        const activeTarget = this.getNativeConversationTarget(chatId);
+        if (!activeTarget?.conversationId || activeTarget.conversationId !== conversationId) {
+            return false;
+        }
+        const approval = normalizePendingApproval(raw?.approval ?? null, conversationId);
+        await this.applyPendingApprovalState(chatId, conversationId, approval, "approval_push");
+        return true;
+    }
+
     scheduleApprovalSync(chatId, conversationId, reason = "activity") {
         if (!chatId || !conversationId || typeof this.config.getCurrentAppState !== "function") {
             return;
@@ -2720,42 +2766,45 @@ class CodexAppDirectCompanion {
             if (!activeTarget?.conversationId || activeTarget.conversationId !== conversationId) {
                 return null;
             }
-            const state = await this.config.getCurrentAppState({
+            if (reason === "activity") {
+                const current = this.pendingApprovals.get(chatId) || null;
+                if (current?.conversationId === conversationId) {
+                    return current;
+                }
+            }
+            const readState = async ({ skipNavigation, timeoutMs, stage }) => this.config.getCurrentAppState({
                 conversationId,
-                reason: `approval_${reason}`,
-                skipNavigation: reason === "activity",
-                timeoutMs: 10000,
+                reason: `approval_${reason}_${stage}`,
+                skipNavigation,
+                timeoutMs,
             }).catch((error) => {
                 const message = error instanceof Error ? error.message : String(error);
-                this.logger.warn(`approval current-state failed chat=${chatId} session=${conversationId} reason=${reason} error=${message}`);
+                this.logger.warn(`approval current-state failed chat=${chatId} session=${conversationId} reason=${reason} stage=${stage} error=${message}`);
                 return null;
             });
-            const approval = normalizePendingApproval(state?.pendingApproval ?? null, conversationId);
-            const current = this.pendingApprovals.get(chatId) || null;
-            if (!approval) {
-                if (current) {
-                    await this.clearPendingApproval(chatId, `approval_resolved:${conversationId}`);
+            let state = null;
+            if (reason === "activity") {
+                state = await readState({
+                    skipNavigation: true,
+                    timeoutMs: 1500,
+                    stage: "passive",
+                });
+                if (!state) {
+                    state = await readState({
+                        skipNavigation: false,
+                        timeoutMs: 5000,
+                        stage: "route_open",
+                    });
                 }
-                return null;
+            } else {
+                state = await readState({
+                    skipNavigation: false,
+                    timeoutMs: 10000,
+                    stage: "direct",
+                });
             }
-            if (current && current.approvalRequestId === approval.approvalRequestId && current.conversationId === conversationId) {
-                return current;
-            }
-            if (current) {
-                await this.clearPendingApproval(chatId, `approval_replace:${conversationId}`);
-            }
-            const sent = await this.api.sendMessageWithMarkup(
-                chatId,
-                this.buildApprovalPrompt(chatId, approval),
-                this.buildApprovalReplyMarkup(approval),
-            );
-            const pending = {
-                ...approval,
-                messageId: Number(sent?.message_id || 0) || null,
-            };
-            this.pendingApprovals.set(chatId, pending);
-            this.logger.info(`approval relayed chat=${chatId} session=${conversationId} approval=${approval.approvalRequestId} type=${approval.type}`);
-            return pending;
+            const approval = normalizePendingApproval(state?.pendingApproval ?? null, conversationId);
+            return await this.applyPendingApprovalState(chatId, conversationId, approval, `approval_${reason}`);
         });
         this.pendingApprovalSyncs.set(key, run);
         try {
@@ -3777,6 +3826,17 @@ async function stopNativeTelegramBridge() {
     }
 }
 
+function notifyNativeTelegramApprovalStateChange(payload = null) {
+    const app = activeNativeApp;
+    if (!app || typeof app.handleApprovalStatePush !== "function") {
+        return null;
+    }
+    return Promise.resolve(app.handleApprovalStatePush(payload)).catch((error) => {
+        appendBootstrapLog(`[approval-state-error] ${formatError(error)}`);
+        throw error;
+    });
+}
+
 async function main() {
     const args = parseArgs(process.argv);
     await bootWithConfigPath(args.configPath, { dryRun: args.dryRun });
@@ -3793,7 +3853,7 @@ if (require.main === module) {
 module.exports = {
     startNativeTelegramBridge,
     stopNativeTelegramBridge,
+    notifyNativeTelegramApprovalStateChange,
     loadConfig,
     CodexAppDirectCompanion,
 };
-
