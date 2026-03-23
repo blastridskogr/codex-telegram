@@ -113,3 +113,18 @@ This reads the live injected app state when the renderer bridge is available, in
 - images: staged locally and injected through the app-native local-image input path
 - mirrored assistant responses preserve common Markdown features such as headings, bold text, inline code, fenced code blocks, links, and blockquotes in Telegram
 - mirrored user/app echo stays plain text on purpose so only Codex output is reformatted
+
+## App-side child routes
+
+These are local controller routes, not Telegram bot commands.
+
+- `POST /thread/spawn-child`
+- `POST /thread/children`
+- `POST /thread/state`
+
+Use them when a higher-level controller or harness wants:
+
+- parent thread = manager
+- child conversation = execution lane
+
+Detailed behavior and limits: [CHILD_CONTEXTS.md](CHILD_CONTEXTS.md)

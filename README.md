@@ -1,6 +1,6 @@
 # codex-telegram
 
-Unofficial Telegram integration for the Windows Codex app: real-time message sync, Codex app commands, and runtime approval handling from Telegram through a locally patched and re-registered copy.
+Unofficial Telegram integration for the Windows Codex app: real-time message sync, Codex app commands, runtime approval handling, and parent-managed child contexts through a locally patched and re-registered copy.
 
 [Features](docs/FEATURES.md) | [Child Contexts](docs/CHILD_CONTEXTS.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
@@ -55,11 +55,11 @@ The current supported path is:
 - re-register a local `OpenAI.Codex` package copy and launch it
 - if the Store update path is blocked by the local dev registration, recover by reinstalling the official Store package first and then reapplying the Telegram patch
 
-Verified baseline on 2026-03-22:
+Verified baseline on 2026-03-24:
 
 - Windows 11
 - Microsoft Store Codex source package `26.313.5234.0`
-- Telegram-patched registered package `26.313.5234.10`
+- Telegram-patched registered package `26.313.5234.35`
 - Node.js 24+
 - PowerShell 5.1+
 
@@ -132,14 +132,16 @@ Portable-specific helpers still exist in `scripts/` as archived reference. The s
 - mirrored user/app echo stays plain text on purpose
 - Telegram images are staged locally and sent through the app-native local-image input path
 
-## Native child contexts
+## Child contexts
 
-The patched app now exposes real parent-managed child contexts, not just Telegram chat bindings.
+The patched app now exposes parent-managed child contexts, not just Telegram chat bindings.
 
-- a parent Codex thread can own native child contexts under it
+- the app can enumerate real native child contexts that already exist under a parent
+- the local controller can create a clean controller-managed child with `POST /thread/spawn-child`
 - each child has its own `conversationId`
-- the parent can inspect those children through `/thread/debug-context` and `/thread/children`
+- the parent can inspect those children through `/thread/debug-context`, `/thread/state`, and `/thread/children`
 - a clean child can keep its own context across multiple turns without reusing the full parent transcript
+- controller-managed child spawn now stays off the visible manager-thread draft route instead of opening a fresh visible thread
 
 That capability is meant for higher-level controllers or harnesses that want:
 

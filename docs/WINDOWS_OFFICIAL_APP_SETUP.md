@@ -150,6 +150,16 @@ Healthy startup should include fresh lines similar to:
 - `broadcast monitor connected pipe=\\.\pipe\codex-ipc`
 - `polling started allowlist=...`
 
+Current verified child-context baseline on 2026-03-24:
+
+- Microsoft Store source package `26.313.5234.0`
+- Telegram-patched registered package `26.313.5234.35`
+- local child-control routes verified:
+  - `/thread/debug-context`
+  - `/thread/state`
+  - `/thread/children`
+  - `/thread/spawn-child`
+
 ## Account and plan behavior
 
 - Telegram does **not** create a separate Codex backend or separate account session
