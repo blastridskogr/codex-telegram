@@ -19,6 +19,24 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 - Follow-up text on a bound session goes through the app-native follow-up submit path, so plain Telegram replies after `/codex_bind` or `/codex_session` reach the real thread.
 - Session switching mirrors the latest 5 instruction/result groups, oldest-to-newest inside that latest set. Completed results stay preferred, and a newer commentary-only work block can replay as a partial group instead of disappearing.
 
+## Native child contexts
+
+The patched app also exposes native parent-managed child contexts.
+
+- a parent Codex thread can spawn child contexts under it
+- each child has its own `conversationId`
+- the parent can inspect those children through app-side routes such as `/thread/debug-context` and `/thread/children`
+- a clean child can keep its own context across multiple turns
+
+This is different from opening an unrelated external thread. The parent remains the manager while the child acts as a separate execution lane.
+
+Important operating rule:
+
+- do not copy the full parent transcript into the child by default
+- use a clean child context as the default path
+
+Detailed behavior and limits: [CHILD_CONTEXTS.md](CHILD_CONTEXTS.md)
+
 ## Message and media behavior
 
 - Plain Telegram text is injected as a Codex user turn.

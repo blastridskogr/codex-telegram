@@ -2,7 +2,7 @@
 
 Unofficial Telegram integration for the Windows Codex app: real-time message sync, Codex app commands, and runtime approval handling from Telegram through a locally patched and re-registered copy.
 
-[Features](docs/FEATURES.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
+[Features](docs/FEATURES.md) | [Child Contexts](docs/CHILD_CONTEXTS.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
 This repository contains the patch source, workflow scripts, and setup docs for a Telegram-driven Codex workflow on Windows. It does **not** include OpenAI binaries, extracted bundles, rebuilt `app.asar`, or your runtime secrets.
 
@@ -131,6 +131,22 @@ Portable-specific helpers still exist in `scripts/` as archived reference. The s
 - mirrored assistant responses preserve common Markdown formatting in Telegram
 - mirrored user/app echo stays plain text on purpose
 - Telegram images are staged locally and sent through the app-native local-image input path
+
+## Native child contexts
+
+The patched app now exposes real parent-managed child contexts, not just Telegram chat bindings.
+
+- a parent Codex thread can own native child contexts under it
+- each child has its own `conversationId`
+- the parent can inspect those children through `/thread/debug-context` and `/thread/children`
+- a clean child can keep its own context across multiple turns without reusing the full parent transcript
+
+That capability is meant for higher-level controllers or harnesses that want:
+
+- parent thread = manager
+- child context = execution lane
+
+Detailed explanation: [docs/CHILD_CONTEXTS.md](docs/CHILD_CONTEXTS.md)
 
 That means the Telegram side is using the same signed-in Codex app you already use, not a separate Codex account path.
 
