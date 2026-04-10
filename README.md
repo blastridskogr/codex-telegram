@@ -2,7 +2,7 @@
 
 Unofficial Telegram integration for the Windows Codex app: real-time message sync, Codex app commands, runtime approval handling, and an official-app patch/re-register workflow through a locally patched and re-registered copy.
 
-[Features](docs/FEATURES.md) | [Release 0.2.1](docs/RELEASE_0.2.1.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
+[Features](docs/FEATURES.md) | [Release 0.2.2](docs/RELEASE_0.2.2.md) | [Windows Official Setup](docs/WINDOWS_OFFICIAL_APP_SETUP.md) | [Bot Setup](docs/TELEGRAM_BOT_SETUP.md) | [Commands](docs/TELEGRAM_COMMANDS.md) | [Security](docs/SECURITY.md)
 
 This repository contains the patch source, workflow scripts, and setup docs for a Telegram-driven Codex workflow on Windows. It does **not** include OpenAI binaries, extracted bundles, rebuilt `app.asar`, or runtime secrets.
 

@@ -4,10 +4,9 @@ This patch release adds project-grouped session selection for Telegram.
 
 ## Changes
 
-- `/codex_session` now opens a project picker first.
+- `/codex_session` now opens a project-grouped session picker.
 - Projects are derived from each Codex session file's `cwd` metadata, matching the workspace/project concept shown in the Codex app.
-- Selecting a project opens a recent-session picker scoped to that project.
-- The per-project session picker still shows up to 10 recent sessions for the selected project.
+- Session buttons are listed under project headers.
 - The project scan covers all active local session files, not only the latest 10 sessions.
 
 ## Existing Behavior Kept

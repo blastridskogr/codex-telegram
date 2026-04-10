@@ -11,6 +11,9 @@ const DEFAULT_PIPE = "\\\\.\\pipe\\codex-ipc";
 const DEFAULT_POLL_TIMEOUT_SEC = 30;
 const DEFAULT_MAX_REPLY_CHARS = 3500;
 const DEFAULT_RECENT_SESSION_LIMIT = 10;
+const DEFAULT_GROUPED_PROJECT_LIMIT = 8;
+const DEFAULT_GROUPED_SESSIONS_PER_PROJECT_LIMIT = 4;
+const DEFAULT_GROUPED_SESSION_BUTTON_LIMIT = 24;
 const DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT = 5;
 const DEFAULT_SESSION_REPLAY_SEND_DELAY_MS = 250;
 const DEFAULT_CHAT_SETTINGS_FILE = "chat_settings.json";
@@ -3341,23 +3344,56 @@ class CodexAppDirectCompanion {
     }
 
     buildProjectPicker(chatId) {
-        const projects = this.catalog.listRecentProjects();
-        if (!projects.length) {
-            return { text: "No recent Codex projects were found.", replyMarkup: null };
+        const entries = this.catalog.collectUniqueSessionFiles()
+            .map((entry) => this.catalog.describeSessionEntry(entry));
+        if (!entries.length) {
+            return { text: "No recent Codex sessions were found.", replyMarkup: null };
         }
-        const lines = ["Recent projects:"];
-        const keyboard = [];
-        for (const [index, project] of projects.entries()) {
-            lines.push(`${index + 1}. ${project.label} (${project.count})`);
-            if (project.cwd) {
-                lines.push(`   ${project.cwd}`);
+
+        const currentSession = this.bindings.getSession(chatId);
+        const projects = new Map();
+        for (const session of entries) {
+            const key = session.projectKey || "unknown";
+            const project = projects.get(key) || {
+                key,
+                label: session.projectLabel || "(unknown project)",
+                cwd: session.projectCwd || "",
+                latestAt: session.modifiedAt,
+                sessions: [],
+            };
+            if (project.sessions.length < DEFAULT_GROUPED_SESSIONS_PER_PROJECT_LIMIT) {
+                project.sessions.push(session);
             }
-            lines.push(`   latest: ${formatSessionTimestamp(project.latestAt)}`);
-            keyboard.push([{ text: `${index + 1}. ${truncateButtonLabel(project.label)}`, callback_data: `project:${project.key}` }]);
+            if (session.modifiedAt > project.latestAt) {
+                project.latestAt = session.modifiedAt;
+            }
+            projects.set(key, project);
+        }
+
+        const grouped = [...projects.values()].sort((a, b) => b.latestAt - a.latestAt).slice(0, DEFAULT_GROUPED_PROJECT_LIMIT);
+        const lines = ["Recent sessions by project:"];
+        const keyboard = [];
+        let buttonIndex = 1;
+        for (const project of grouped) {
+            lines.push("");
+            lines.push(`[${project.label}]`);
+            if (project.cwd) {
+                lines.push(project.cwd);
+            }
+            for (const session of project.sessions) {
+                const current = session.sessionId === currentSession ? " [current]" : "";
+                const title = session.title || session.preview;
+                lines.push(`${buttonIndex}. ${title}${current}`);
+                lines.push(`   ${formatSessionTimestamp(session.modifiedAt)} | ${session.preview}`);
+                if (keyboard.length < DEFAULT_GROUPED_SESSION_BUTTON_LIMIT) {
+                    keyboard.push([{ text: `${buttonIndex}. ${truncateButtonLabel(title)}`, callback_data: `set:session:${session.sessionId}` }]);
+                }
+                buttonIndex += 1;
+            }
         }
         lines.push("");
-        lines.push("Choose a project first, then choose a session.");
-        return { text: lines.join("\n"), replyMarkup: { inline_keyboard: keyboard } };
+        lines.push("Choose a session button below.");
+        return { text: lines.join("\n"), replyMarkup: keyboard.length ? { inline_keyboard: keyboard } : null };
     }
 
     buildSessionPicker(chatId, projectKey = null) {
