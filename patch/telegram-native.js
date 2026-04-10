@@ -15,11 +15,12 @@ const DEFAULT_SESSION_HISTORY_REPLAY_PAIR_LIMIT = 5;
 const DEFAULT_SESSION_REPLAY_SEND_DELAY_MS = 250;
 const DEFAULT_CHAT_SETTINGS_FILE = "chat_settings.json";
 const DEFAULT_PENDING_NEW_THREAD_FILE = "pending_new_thread.json";
+const DEFAULT_RUNTIME_STATE_FILE = "telegram_runtime_state.json";
 const DEFAULT_IPC_CONNECT_TIMEOUT_MS = 30000;
 const DEFAULT_IPC_RETRY_DELAY_MS = 500;
 const DEFAULT_TURN_INJECT_RETRY_COUNT = 3;
 const DEFAULT_TURN_INJECT_RETRY_DELAY_MS = 900;
-const DEFAULT_TURN_DELIVERY_ACK_TIMEOUT_MS = 17000;
+const DEFAULT_TURN_DELIVERY_ACK_TIMEOUT_MS = 30000;
 const DEFAULT_APPROVAL_SYNC_DELAY_MS = 400;
 const DEFAULT_LABEL = "Default";
 const DEFAULT_PERMISSION_LABEL = "Basic permission";
@@ -38,8 +39,6 @@ const CODEX_COMMANDS = [
     { command: "codex_current", description: "Show the current Codex app state." },
     { command: "codex_new", description: "Open a real Codex New Thread draft in the app." },
     { command: "codex_session", description: "Pick the active Codex session." },
-    { command: "codex_bind", description: "Bind this chat to a Codex session." },
-    { command: "codex_bindindex", description: "Bind this chat using a recent session index." },
     { command: "codex_model", description: "Pick the Codex model." },
     { command: "codex_fast", description: "Pick the Codex Fast mode." },
     { command: "codex_reasoning", description: "Pick the Codex reasoning effort." },
@@ -59,7 +58,7 @@ const REASONING_LABELS = {
     high: "High",
     xhigh: "Extra High",
 };
-const START_MESSAGE = "Codex Portable Telegram is online. Use /help for general commands and /codex_help for Codex controls.";
+const START_MESSAGE = "Codex Telegram is online. Use /help for general commands and /codex_help for Codex controls.";
 const HELP_MESSAGE = [
     "General commands:",
     "/start - show the startup message",
@@ -69,9 +68,9 @@ const HELP_MESSAGE = [
     "",
     "Codex controls are exposed only through /codex_* commands.",
 ].join("\n");
-const UNAUTHORIZED_MESSAGE = "This Telegram chat is not allowed to control the Codex Portable Telegram runtime.";
-const NO_SESSION_MESSAGE = "This chat is not bound to a Codex session. Use /codex_session or /codex_bind <session_id>.";
-const NO_SESSION_PICKER_MESSAGE = "This chat is not bound to a Codex session. Pick a recent session below or use /codex_bind <session_id>.";
+const UNAUTHORIZED_MESSAGE = "This Telegram chat is not allowed to control the Codex Telegram runtime.";
+const NO_SESSION_MESSAGE = "This chat is not bound to a Codex session. Use /codex_session.";
+const NO_SESSION_PICKER_MESSAGE = "This chat is not bound to a Codex session. Pick a recent session below.";
 
 function formatError(error) {
     if (error instanceof Error) {
@@ -142,8 +141,12 @@ function isRetryableTurnInjectError(error) {
         || message.includes("no-client-found")
         || message.includes("no client found")
         || message.includes("client not found")
-        || message.includes("unavailable in the renderer")
-        || (message.includes("timed out") && message.includes("bound turn"));
+        || message.includes("unavailable in the renderer");
+}
+
+function isBoundTurnSubmitTimeoutError(error) {
+    const message = String(error?.message || error || "").toLowerCase();
+    return message.includes("timed out waiting for codex to submit the bound turn");
 }
 
 function appendBootstrapLog(message) {
@@ -586,6 +589,29 @@ function normalizeFilePathFromUrl(urlValue) {
         return path.normalize(value);
     }
     return null;
+}
+
+function decodeDataImageUrl(urlValue) {
+    const value = String(urlValue || "").trim();
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/.exec(value);
+    if (!match) {
+        return null;
+    }
+    const mimeType = match[1].toLowerCase();
+    const extension = mimeType.includes("png")
+        ? ".png"
+        : mimeType.includes("webp")
+            ? ".webp"
+            : mimeType.includes("gif")
+                ? ".gif"
+                : mimeType.includes("bmp")
+                    ? ".bmp"
+                    : ".jpg";
+    return {
+        mimeType,
+        extension,
+        buffer: Buffer.from(match[2], "base64"),
+    };
 }
 
 function extractInputImageRefs(input) {
@@ -1049,7 +1075,7 @@ function flattenConversationMessages(conversationState) {
 
 function buildMirrorFingerprint(message) {
     const text = String(message?.text || "").trim();
-    const images = Array.isArray(message?.images) ? message.images.map((value) => path.basename(normalizeFilePathFromUrl(value) || String(value))).sort() : [];
+    const images = Array.isArray(message?.images) ? message.images.map(() => "image").sort() : [];
     const attachments = Array.isArray(message?.attachments)
         ? message.attachments.map((item) => path.basename(item?.fsPath || item?.path || item?.label || "")).filter(Boolean).sort()
         : [];
@@ -1182,19 +1208,19 @@ class OutputLogger {
     error(message) { this.write("error", message); }
 }
 
-function migrateLegacyConfigToPortable(userDataPath) {
-    const portableConfigPath = path.join(userDataPath, "telegram-native.json");
-    appendBootstrapLog(`[migrate] userDataPath=${userDataPath} portableConfigPath=${portableConfigPath}`);
-    if (fs.existsSync(portableConfigPath)) {
-        appendBootstrapLog(`[migrate] portable config exists path=${portableConfigPath}`);
-        return portableConfigPath;
+function migrateLegacyConfigToRuntime(userDataPath) {
+    const runtimeConfigPath = path.join(userDataPath, "telegram-native.json");
+    appendBootstrapLog(`[migrate] userDataPath=${userDataPath} runtimeConfigPath=${runtimeConfigPath}`);
+    if (fs.existsSync(runtimeConfigPath)) {
+        appendBootstrapLog(`[migrate] runtime config exists path=${runtimeConfigPath}`);
+        return runtimeConfigPath;
     }
 
     const legacyBaseDir = path.join(os.homedir(), "AppData", "Roaming", "Codex");
     const legacyConfigPath = process.env.CODEX_TELEGRAM_NATIVE_LEGACY_CONFIG || path.join(legacyBaseDir, "telegram-native.json");
     if (!fs.existsSync(legacyConfigPath)) {
         appendBootstrapLog(`[migrate] legacy config missing path=${legacyConfigPath}`);
-        return portableConfigPath;
+        return runtimeConfigPath;
     }
 
     try {
@@ -1237,14 +1263,14 @@ function migrateLegacyConfigToPortable(userDataPath) {
             fs.copyFileSync(legacyBindingsPath, bindingsPath);
         }
 
-        fs.writeFileSync(portableConfigPath, JSON.stringify(migrated, null, 2), "utf8");
-        appendBootstrapLog(`[migrate] wrote portable config path=${portableConfigPath}`);
+        fs.writeFileSync(runtimeConfigPath, JSON.stringify(migrated, null, 2), "utf8");
+        appendBootstrapLog(`[migrate] wrote runtime config path=${runtimeConfigPath}`);
     } catch (error) {
         appendBootstrapLog(`[migrate-error] ${formatError(error)}`);
         console.error("[telegram-native-migrate]", formatError(error));
     }
 
-    return portableConfigPath;
+    return runtimeConfigPath;
 }
 
 class SessionBindings {
@@ -1400,6 +1426,87 @@ class PendingNewThreadStore {
         delete this.pendingByChat[normalizedChatId];
         this.save();
         return true;
+    }
+}
+
+class RuntimeStateStore {
+    constructor(filePath) {
+        this.filePath = filePath;
+        this.offset = null;
+        this.recentUpdateIds = [];
+        this.recentMessageKeys = [];
+        this.load();
+    }
+
+    load() {
+        if (!fs.existsSync(this.filePath)) {
+            this.offset = null;
+            this.recentUpdateIds = [];
+            this.recentMessageKeys = [];
+            return;
+        }
+        try {
+            const payload = JSON.parse(readUtf8Text(this.filePath));
+            this.offset = Number.isInteger(payload?.offset) ? payload.offset : null;
+            this.recentUpdateIds = Array.isArray(payload?.recent_update_ids)
+                ? payload.recent_update_ids.map((value) => String(value)).slice(-200)
+                : [];
+            this.recentMessageKeys = Array.isArray(payload?.recent_message_keys)
+                ? payload.recent_message_keys.map((value) => String(value)).slice(-200)
+                : [];
+        } catch {
+            this.offset = null;
+            this.recentUpdateIds = [];
+            this.recentMessageKeys = [];
+        }
+    }
+
+    save() {
+        ensureDir(path.dirname(this.filePath));
+        writeJsonObject(this.filePath, {
+            offset: this.offset,
+            recent_update_ids: this.recentUpdateIds.slice(-200),
+            recent_message_keys: this.recentMessageKeys.slice(-200),
+        });
+    }
+
+    getOffset() {
+        return Number.isInteger(this.offset) ? this.offset : null;
+    }
+
+    setOffset(offset) {
+        this.offset = Number.isInteger(offset) ? offset : null;
+        this.save();
+    }
+
+    hasSeenUpdateId(updateId) {
+        if (updateId == null) {
+            return false;
+        }
+        return this.recentUpdateIds.includes(String(updateId));
+    }
+
+    hasSeenMessageKey(messageKey) {
+        if (!messageKey) {
+            return false;
+        }
+        return this.recentMessageKeys.includes(String(messageKey));
+    }
+
+    markProcessed(updateId, messageKey = null) {
+        if (updateId != null) {
+            this.recentUpdateIds.push(String(updateId));
+            if (this.recentUpdateIds.length > 200) {
+                this.recentUpdateIds = this.recentUpdateIds.slice(-200);
+            }
+        }
+        if (messageKey) {
+            this.recentMessageKeys.push(String(messageKey));
+            if (this.recentMessageKeys.length > 200) {
+                this.recentMessageKeys = this.recentMessageKeys.slice(-200);
+            }
+        }
+        this.save();
     }
 }
 
@@ -2039,6 +2146,9 @@ class AppBroadcastMonitor {
         this.conversationStates = new Map();
         this.pendingSuppressions = new Map();
         this.pendingDeliveryWaiters = new Map();
+        this.pendingBaselineWaiters = new Map();
+        this.activeTurnSessions = new Set();
+        this.pendingTurns = new Map();
     }
 
     async start() {
@@ -2143,6 +2253,94 @@ class AppBroadcastMonitor {
         return true;
     }
 
+    async waitForConversationBaseline(sessionId, timeoutMs = 10000) {
+        if (this.knownItemIds.has(sessionId)) {
+            return;
+        }
+        return await new Promise((resolve, reject) => {
+            let settled = false;
+            const waiter = {
+                resolve: () => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    clearTimeout(timeoutHandle);
+                    const queue = this.pendingBaselineWaiters.get(sessionId) || [];
+                    const next = queue.filter((candidate) => candidate !== waiter);
+                    if (next.length) {
+                        this.pendingBaselineWaiters.set(sessionId, next);
+                    } else {
+                        this.pendingBaselineWaiters.delete(sessionId);
+                    }
+                    resolve();
+                },
+            };
+            const timeoutHandle = setTimeout(() => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                const queue = this.pendingBaselineWaiters.get(sessionId) || [];
+                const next = queue.filter((candidate) => candidate !== waiter);
+                if (next.length) {
+                    this.pendingBaselineWaiters.set(sessionId, next);
+                } else {
+                    this.pendingBaselineWaiters.delete(sessionId);
+                }
+                reject(new Error(`Timed out waiting for conversation baseline ${sessionId}`));
+            }, timeoutMs);
+            const queue = this.pendingBaselineWaiters.get(sessionId) || [];
+            queue.push(waiter);
+            this.pendingBaselineWaiters.set(sessionId, queue);
+        });
+    }
+
+    resolveConversationBaseline(sessionId) {
+        const queue = this.pendingBaselineWaiters.get(sessionId) || [];
+        if (!queue.length) {
+            return;
+        }
+        this.pendingBaselineWaiters.delete(sessionId);
+        for (const waiter of queue) {
+            waiter.resolve();
+        }
+    }
+
+    hasActiveTurn(sessionId) {
+        return this.activeTurnSessions.has(sessionId);
+    }
+
+    queuePendingTurn(sessionId, turnPayload, settingsOverride = null) {
+        const queue = this.pendingTurns.get(sessionId) || [];
+        queue.push({ turnPayload, settingsOverride });
+        if (queue.length > 10) {
+            queue.splice(0, queue.length - 10);
+        }
+        this.pendingTurns.set(sessionId, queue);
+        this.logger.info(`queued telegram turn session=${sessionId} depth=${queue.length}`);
+        return queue.length;
+    }
+
+    flushNextPendingTurn(sessionId, force = false) {
+        const queue = this.pendingTurns.get(sessionId) || [];
+        if (!queue.length || (!force && this.activeTurnSessions.has(sessionId))) {
+            return;
+        }
+        this.activeTurnSessions.delete(sessionId);
+        const next = queue.shift();
+        if (queue.length) {
+            this.pendingTurns.set(sessionId, queue);
+        } else {
+            this.pendingTurns.delete(sessionId);
+        }
+        setTimeout(() => {
+            this.injectTurn(sessionId, next.turnPayload, next.settingsOverride).catch((error) => {
+                this.logger.error(`queued turn injection failed session=${sessionId}: ${formatError(error)}`);
+            });
+        }, 250);
+    }
+
     async connectWithRetry(timeoutMs = DEFAULT_IPC_CONNECT_TIMEOUT_MS) {
         const startedAt = Date.now();
         let lastError = null;
@@ -2165,74 +2363,108 @@ class AppBroadcastMonitor {
     }
 
     async injectTurn(sessionId, turnPayload, settingsOverride = null) {
-        const settings = {
-            ...this.config.defaultSettings,
-            workspaceRoots: this.config.workspaceRoots,
-            ...(settingsOverride || {}),
-        };
-        const useBoundTurnBridge = typeof this.config.submitBoundThreadTurn === "function";
-        const suppressionMessage = {
-            text: String(turnPayload?.prompt || "").trim(),
-            images: extractInputImageRefs(turnPayload?.input),
-            attachments: Array.isArray(turnPayload?.attachments) ? turnPayload.attachments : [],
-        };
-        const deliveryFingerprint = buildMirrorFingerprint(suppressionMessage);
-        let lastError = null;
-        for (let attempt = 1; attempt <= DEFAULT_TURN_INJECT_RETRY_COUNT; attempt += 1) {
-            if (typeof this.config.ensureSessionOpen === "function") {
-                await this.config.ensureSessionOpen(sessionId);
+        if (this.activeTurnSessions.has(sessionId)) {
+            this.queuePendingTurn(sessionId, turnPayload, settingsOverride);
+            return;
+        }
+        this.activeTurnSessions.add(sessionId);
+        try {
+            const settings = {
+                ...this.config.defaultSettings,
+                workspaceRoots: this.config.workspaceRoots,
+                ...(settingsOverride || {}),
+            };
+            const useBoundTurnBridge = typeof this.config.submitBoundThreadTurn === "function";
+            const suppressionMessage = {
+                text: String(turnPayload?.prompt || "").trim(),
+                images: extractInputImageRefs(turnPayload?.input),
+                attachments: Array.isArray(turnPayload?.attachments) ? turnPayload.attachments : [],
+            };
+            const hasMediaInput = suppressionMessage.images.length > 0 || suppressionMessage.attachments.length > 0;
+            const deliveryFingerprint = buildMirrorFingerprint(suppressionMessage);
+            if (useBoundTurnBridge && !this.knownItemIds.has(sessionId)) {
+                try {
+                    await this.waitForConversationBaseline(sessionId);
+                } catch (error) {
+                    this.logger.warn(`baseline wait failed session=${sessionId} error=${String(error?.message || error)}`);
+                }
             }
-            if (!useBoundTurnBridge && !this.socketReady()) {
-                await this.connectWithRetry();
-            }
-            this.logger.info(`inject session=${sessionId} attempt=${attempt} inputs=${turnPayload.input.length} attachments=${turnPayload.attachments.length}`);
-            try {
-                if (useBoundTurnBridge) {
-                    const deliveryWaiter = this.waitForUserMessageDelivery(sessionId, deliveryFingerprint);
-                    const submitOutcomePromise = this.config.submitBoundThreadTurn({
-                        conversationId: sessionId,
-                        input: turnPayload.input,
-                        attachments: turnPayload.attachments,
-                        cwd: settings.cwd ?? null,
-                        workspaceRoots: settings.workspaceRoots || this.config.workspaceRoots,
-                        settings,
-                    }).then(
-                        (conversationId) => ({ kind: "submit", ok: true, conversationId }),
-                        (error) => ({ kind: "submit", ok: false, error }),
-                    );
-                    let deliveryAcknowledged = false;
-                    submitOutcomePromise.then((outcome) => {
-                        if (deliveryAcknowledged && !outcome.ok) {
-                            this.logger.warn(`bound turn submit completion failed after delivery ack session=${sessionId} error=${String(outcome.error?.message || outcome.error)}`);
-                        }
-                    });
-                    const deliveryOutcomePromise = deliveryWaiter.promise.then(
-                        (payload) => ({ kind: "delivery", payload }),
-                    );
-                    const firstOutcome = await Promise.race([submitOutcomePromise, deliveryOutcomePromise]);
-                    if (firstOutcome.kind === "submit") {
-                        deliveryWaiter.cancel();
-                        if (!firstOutcome.ok) {
-                            throw firstOutcome.error;
+            let lastError = null;
+            for (let attempt = 1; attempt <= DEFAULT_TURN_INJECT_RETRY_COUNT; attempt += 1) {
+                if (typeof this.config.ensureSessionOpen === "function") {
+                    await this.config.ensureSessionOpen(sessionId);
+                }
+                if (!useBoundTurnBridge && !this.socketReady()) {
+                    await this.connectWithRetry();
+                }
+                this.logger.info(`inject session=${sessionId} attempt=${attempt} inputs=${turnPayload.input.length} attachments=${turnPayload.attachments.length}`);
+                try {
+                    if (useBoundTurnBridge) {
+                        const deliveryWaiter = this.waitForUserMessageDelivery(sessionId, deliveryFingerprint);
+                        const submitOutcomePromise = this.config.submitBoundThreadTurn({
+                            conversationId: sessionId,
+                            input: turnPayload.input,
+                            attachments: turnPayload.attachments,
+                            cwd: settings.cwd ?? null,
+                            workspaceRoots: settings.workspaceRoots || this.config.workspaceRoots,
+                            settings,
+                        }).then(
+                            (conversationId) => ({ kind: "submit", ok: true, conversationId }),
+                            (error) => ({ kind: "submit", ok: false, error }),
+                        );
+                        let deliveryAcknowledged = false;
+                        submitOutcomePromise.then((outcome) => {
+                            if (deliveryAcknowledged && !outcome.ok) {
+                                this.logger.warn(`bound turn submit completion failed after delivery ack session=${sessionId} error=${String(outcome.error?.message || outcome.error)}`);
+                            }
+                        });
+                        const deliveryOutcomePromise = deliveryWaiter.promise.then(
+                            (payload) => ({ kind: "delivery", payload }),
+                        );
+                        const firstOutcome = await Promise.race([submitOutcomePromise, deliveryOutcomePromise]);
+                        if (firstOutcome.kind === "submit") {
+                            if (!firstOutcome.ok) {
+                                if (isBoundTurnSubmitTimeoutError(firstOutcome.error)) {
+                                    try {
+                                        const lateDelivery = await deliveryWaiter.promise;
+                                        deliveryAcknowledged = true;
+                                        this.logger.info(`bound turn delivery acknowledged after submit timeout session=${sessionId} item=${lateDelivery?.messageId || "-"}`);
+                                        return;
+                                    } catch {
+                                        if (hasMediaInput) {
+                                            deliveryWaiter.cancel();
+                                            this.logger.warn(`bound media turn submit timed out after visible handoff; keeping active turn session=${sessionId}`);
+                                            return;
+                                        }
+                                    }
+                                }
+                                deliveryWaiter.cancel();
+                                throw firstOutcome.error;
+                            }
+                            deliveryWaiter.cancel();
+                        } else {
+                            deliveryAcknowledged = true;
+                            this.logger.info(`bound turn delivery acknowledged from conversation state session=${sessionId} item=${firstOutcome.payload?.messageId || "-"}`);
                         }
                     } else {
-                        deliveryAcknowledged = true;
-                        this.logger.info(`bound turn delivery acknowledged from conversation state session=${sessionId} item=${firstOutcome.payload?.messageId || "-"}`);
+                        await this.ipc.startTurnWithContent(sessionId, turnPayload.input, turnPayload.attachments, settings);
                     }
-                } else {
-                    await this.ipc.startTurnWithContent(sessionId, turnPayload.input, turnPayload.attachments, settings);
+                    return;
+                } catch (error) {
+                    lastError = error;
+                    if (!isRetryableTurnInjectError(error) || attempt === DEFAULT_TURN_INJECT_RETRY_COUNT) {
+                        throw error;
+                    }
+                    this.logger.warn(`inject retry after transient client miss session=${sessionId} attempt=${attempt} error=${String(error?.message || error)}`);
+                    await delay(DEFAULT_TURN_INJECT_RETRY_DELAY_MS);
                 }
-                return;
-            } catch (error) {
-                lastError = error;
-                if (!isRetryableTurnInjectError(error) || attempt === DEFAULT_TURN_INJECT_RETRY_COUNT) {
-                    throw error;
-                }
-                this.logger.warn(`inject retry after transient client miss session=${sessionId} attempt=${attempt} error=${String(error?.message || error)}`);
-                await delay(DEFAULT_TURN_INJECT_RETRY_DELAY_MS);
             }
+            throw lastError || new Error(`Failed to inject turn for session ${sessionId}`);
+        } catch (error) {
+            this.activeTurnSessions.delete(sessionId);
+            this.flushNextPendingTurn(sessionId, true);
+            throw error;
         }
-        throw lastError || new Error(`Failed to inject turn for session ${sessionId}`);
     }
 
     socketReady() {
@@ -2327,7 +2559,19 @@ class AppBroadcastMonitor {
     async sendMedia(chatId, message) {
         let sent = 0;
         for (const imageUrl of message.images || []) {
-            const imagePath = normalizeFilePathFromUrl(imageUrl);
+            let imagePath = normalizeFilePathFromUrl(imageUrl);
+            if (!imagePath) {
+                const decoded = decodeDataImageUrl(imageUrl);
+                if (decoded) {
+                    const digest = crypto.createHash("sha256").update(decoded.buffer).digest("hex").slice(0, 24);
+                    const mirrorDir = path.join(this.config.stateDir, "mirrored-images");
+                    ensureDir(mirrorDir);
+                    imagePath = path.join(mirrorDir, `codex-image-${digest}${decoded.extension}`);
+                    if (!fs.existsSync(imagePath)) {
+                        fs.writeFileSync(imagePath, decoded.buffer);
+                    }
+                }
+            }
             if (!imagePath || !fs.existsSync(imagePath)) {
                 this.logger.warn(`skip mirror image missing path=${imageUrl}`);
                 continue;
@@ -2370,6 +2614,7 @@ class AppBroadcastMonitor {
             );
             this.knownItemIds.set(conversationId, delivered);
             this.logger.info(`prime snapshot session=${conversationId} items=${delivered.size}`);
+            this.resolveConversationBaseline(conversationId);
             return;
         }
 
@@ -2398,6 +2643,8 @@ class AppBroadcastMonitor {
             }
 
             await this.sendAssistantText(chatId, message.text);
+            this.activeTurnSessions.delete(conversationId);
+            this.flushNextPendingTurn(conversationId, true);
         }
     }
 }
@@ -2410,14 +2657,25 @@ class CodexAppDirectCompanion {
         this.bindings = new SessionBindings(config.bindingsPath);
         this.chatSettings = new ChatSettingsStore(path.join(config.stateDir, DEFAULT_CHAT_SETTINGS_FILE));
         this.pendingNewThread = new PendingNewThreadStore(path.join(config.stateDir, DEFAULT_PENDING_NEW_THREAD_FILE));
+        this.runtimeState = new RuntimeStateStore(path.join(config.stateDir, DEFAULT_RUNTIME_STATE_FILE));
         this.modelCatalog = new ModelCatalog(config.codexHome, logger);
         this.catalog = new SessionCatalog(config.codexHome, logger);
         this.pendingApprovals = new Map();
         this.pendingApprovalSyncTimers = new Map();
         this.pendingApprovalSyncs = new Map();
         this.monitor = new AppBroadcastMonitor(this.api, this.bindings, config, logger);
-        this.offset = null;
+        this.offset = this.runtimeState.getOffset();
         this.disposed = false;
+    }
+
+    buildUpdateMessageKey(update) {
+        const message = update?.message || update?.edited_message || update?.callback_query?.message || null;
+        const chatId = String(message?.chat?.id || "");
+        const messageId = Number(message?.message_id || 0) || null;
+        if (!chatId || !messageId) {
+            return null;
+        }
+        return `${chatId}:${messageId}`;
     }
 
     isAuthorized(chatId) {
@@ -2429,7 +2687,7 @@ class CodexAppDirectCompanion {
 
     async syncCommands() {
         const commands = [
-            { command: "start", description: "Show the Codex Portable Telegram startup message." },
+            { command: "start", description: "Show the Codex Telegram startup message." },
             { command: "help", description: "Show general Telegram commands." },
             { command: "status", description: "Show runtime status." },
             ...CODEX_COMMANDS,
@@ -2578,7 +2836,7 @@ class CodexAppDirectCompanion {
         const sessionId = chatId != null ? (this.bindings.getSession(chatId) || "(not bound)") : "(n/a)";
         const pending = chatId != null && this.pendingNewThread.get(chatId)?.active ? "yes" : "no";
         const lines = [
-            "Codex Portable Telegram is online.",
+            "Codex Telegram is online.",
             `Pipe: ${this.config.codexIpcPipe}`,
             `Bindings: ${this.config.bindingsPath}`,
             `Inbox: ${this.config.telegramInboxDir}`,
@@ -3301,7 +3559,7 @@ class CodexAppDirectCompanion {
                 throw new Error("Fast applies only after the draft becomes a real Codex session.");
             }
             if (typeof this.config.setThreadServiceTier !== "function") {
-                throw new Error("Fast is unavailable in this portable build.");
+                throw new Error("Fast is unavailable in this build.");
             }
             await this.config.setThreadServiceTier({
                 conversationId: target.conversationId,
@@ -3327,7 +3585,7 @@ class CodexAppDirectCompanion {
 
         if (kind === "model" || kind === "effort") {
             if (typeof this.config.setModelAndReasoning !== "function") {
-                throw new Error("Model and reasoning controls are unavailable in this portable build.");
+                throw new Error("Model and reasoning controls are unavailable in this build.");
             }
             const model = kind === "model" ? selected.value : (settings.model ?? null);
             const nextEffortOptions = this.modelCatalog.getEffortOptions(model);
@@ -3347,7 +3605,7 @@ class CodexAppDirectCompanion {
 
         if (kind === "permission" || kind === "sandbox") {
             if (typeof this.config.setPermissionMode !== "function") {
-                throw new Error("Permission control is unavailable in this portable build.");
+                throw new Error("Permission control is unavailable in this build.");
             }
             const permissionMode = normalizePermissionMode(selected.value);
             const result = await this.config.setPermissionMode({
@@ -3476,8 +3734,6 @@ class CodexAppDirectCompanion {
                 "/codex_current",
                 "/codex_new [prompt]",
                 "/codex_session",
-                "/codex_bind <session_id>",
-                "/codex_bindindex <n>",
                 "/codex_model",
                 "/codex_fast",
                 "/codex_reasoning",
@@ -3671,6 +3927,13 @@ class CodexAppDirectCompanion {
                 const updates = await this.api.getUpdates(this.offset, this.config.pollTimeoutSec);
                 for (const update of updates) {
                     this.offset = Number(update.update_id) + 1;
+                    this.runtimeState.setOffset(this.offset);
+                    const messageKey = this.buildUpdateMessageKey(update);
+                    if (this.runtimeState.hasSeenUpdateId(update.update_id) || this.runtimeState.hasSeenMessageKey(messageKey)) {
+                        this.logger.warn(`skip duplicate telegram update updateId=${String(update.update_id)} key=${messageKey || "-"}`);
+                        continue;
+                    }
+                    this.runtimeState.markProcessed(update.update_id, messageKey);
                     try {
                         await this.processUpdate(update);
                     } catch (error) {
@@ -3765,7 +4028,7 @@ async function startNativeTelegramBridge(options = {}) {
         || process.env.CODEX_TELEGRAM_NATIVE_CONFIG
         || path.join(userDataPath, "telegram-native.json");
     if (!fs.existsSync(configPath)) {
-        configPath = migrateLegacyConfigToPortable(userDataPath);
+        configPath = migrateLegacyConfigToRuntime(userDataPath);
     }
     appendBootstrapLog(`[start] resolvedConfigPath=${configPath} exists=${fs.existsSync(configPath)}`);
     if (!fs.existsSync(configPath)) {

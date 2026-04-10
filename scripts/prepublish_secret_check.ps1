@@ -12,8 +12,7 @@ $localOnlyPatterns = @(
   'work/*',
   'state/*',
   'logs/*',
-  'telegram-inbox/*',
-  'portable_userdata/*'
+  'telegram-inbox/*'
 )
 
 Push-Location $repoRoot

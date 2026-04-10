@@ -17,8 +17,6 @@ The runtime separates general bot commands from Codex control commands.
 | `/codex_current` | show current session, model, Fast mode, reasoning, permission |
 | `/codex_new [prompt]` | open a real native Codex new-thread flow |
 | `/codex_session` | open the recent-session picker |
-| `/codex_bind <session_id>` | bind this chat to a specific session |
-| `/codex_bindindex <n>` | bind this chat to a session from the recent-session list |
 | `/codex_unbind` | remove the current chat binding |
 
 Compatibility redirects:
@@ -31,14 +29,12 @@ Compatibility redirects:
 
 - `/codex_new`
 - `/codex_session`
-- `/codex_bind <session_id>`
-- `/codex_bindindex <n>`
 
 Behavior:
 
 - `/codex_new` does **not** synthesize a fake session. It opens the real Codex new-thread draft in the app.
 - the first Telegram message after `/codex_new` creates the real thread through Codex and auto-binds the returned `conversationId`
-- after `/codex_bind` or `/codex_session`, plain Telegram follow-up text is submitted through the app-native bound-thread follow-up path
+- after `/codex_session`, plain Telegram follow-up text is submitted through the app-native bound-thread follow-up path
 - bind/switch actions open the real Codex conversation in the app before Telegram treats the binding as live
 - the picker shows `session title + session id + last activity`
 - when you switch sessions, the latest 5 instruction/result groups are mirrored back into Telegram as display-only chat output, oldest-to-newest within that latest set
@@ -109,22 +105,11 @@ This reads the live injected app state when the renderer bridge is available, in
 ## Media behavior
 
 - text messages: injected into the bound Codex session
+- bound text messages are serialized; if Codex is still processing the prior turn, the new Telegram message waits and is then submitted as the next Codex input
+- duplicate Telegram delivery is suppressed with persisted `update_id` and `chat_id:message_id` state
 - documents: injected as attachments
 - images: staged locally and injected through the app-native local-image input path
+- image turns follow the same serialized queue as text turns and are not retried after a visible Codex handoff timeout
+- Codex `data:image/...` outputs are materialized locally and sent back to Telegram as images
 - mirrored assistant responses preserve common Markdown features such as headings, bold text, inline code, fenced code blocks, links, and blockquotes in Telegram
 - mirrored user/app echo stays plain text on purpose so only Codex output is reformatted
-
-## App-side child routes
-
-These are local controller routes, not Telegram bot commands.
-
-- `POST /thread/spawn-child`
-- `POST /thread/children`
-- `POST /thread/state`
-
-Use them when a higher-level controller or harness wants:
-
-- parent thread = manager
-- child conversation = execution lane
-
-Detailed behavior and limits: [CHILD_CONTEXTS.md](CHILD_CONTEXTS.md)

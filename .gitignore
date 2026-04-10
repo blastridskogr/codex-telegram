@@ -6,7 +6,6 @@ logs/
 telegram-inbox/
 telegram-native-inbox/
 telegram-native-state/
-portable_userdata/
 *.log
 *.asar
 *.tmp

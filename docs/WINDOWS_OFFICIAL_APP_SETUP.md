@@ -150,15 +150,10 @@ Healthy startup should include fresh lines similar to:
 - `broadcast monitor connected pipe=\\.\pipe\codex-ipc`
 - `polling started allowlist=...`
 
-Current verified child-context baseline on 2026-03-24:
+Current maintained baseline:
 
-- Microsoft Store source package `26.313.5234.0`
-- Telegram-patched registered package `26.313.5234.35`
-- local child-control routes verified:
-  - `/thread/debug-context`
-  - `/thread/state`
-  - `/thread/children`
-  - `/thread/spawn-child`
+- latest official Codex app
+- `v30` Telegram feature line rebased on that official base
 
 ## Account and plan behavior
 

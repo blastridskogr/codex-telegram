@@ -12,6 +12,7 @@ if (-not $WorkspaceRoot) {
 
 $packageRoot = Join-Path $WorkspaceRoot 'package_root'
 $extractRoot = Join-Path $WorkspaceRoot 'extract'
+$asarCli = Join-Path $repoRoot 'node_modules\.bin\asar.cmd'
 
 function Invoke-External {
   param(
@@ -50,7 +51,10 @@ if (-not $SkipExtract) {
   if (Test-Path $extractRoot) {
     Remove-Item $extractRoot -Recurse -Force
   }
-  Invoke-External 'npx.cmd' @('asar', 'extract', $asarCandidate.FullName, $extractRoot)
+  if (-not (Test-Path $asarCli)) {
+    throw "asar CLI not found: $asarCli"
+  }
+  Invoke-External $asarCli @('extract', $asarCandidate.FullName, $extractRoot)
 }
 
 Write-Output "OFFICIAL_APP_WORKSPACE_READY $WorkspaceRoot"

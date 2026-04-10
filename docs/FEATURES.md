@@ -7,54 +7,33 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 ## App-native control surface
 
 - Telegram support is injected into the official Codex app process through patched main and renderer bundles.
-- `/codex_model`, `/codex_fast`, `/codex_reasoning`, `/codex_permission`, and `/codex_current` use app-native control or state paths instead of Telegram-only shadow state.
-- `/codex_sandbox` is not a second settings surface. It is only a compatibility redirect to `/codex_permission`.
-- runtime approval prompts are relayed into Telegram with inline approve or reject actions, so Telegram-driven work is not blocked by an approval UI that only exists inside the Codex app
+- `/codex_model`, `/codex_fast`, `/codex_reasoning`, `/codex_permission`, and `/codex_current` use app-native control or state paths.
+- runtime approval prompts are relayed into Telegram with approve or reject actions.
 
 ## Session lifecycle
 
 - One Telegram chat binds to one active Codex conversation at a time.
 - `/codex_new` opens the real Codex new-thread flow.
 - The first Telegram message after `/codex_new` creates the real thread and auto-binds the returned `conversationId`.
-- Follow-up text on a bound session goes through the app-native follow-up submit path, so plain Telegram replies after `/codex_bind` or `/codex_session` reach the real thread.
-- Session switching mirrors the latest 5 instruction/result groups, oldest-to-newest inside that latest set. Completed results stay preferred, and a newer commentary-only work block can replay as a partial group instead of disappearing.
-
-## Child contexts
-
-The patched app exposes parent-managed child contexts in two useful forms.
-
-- native child contexts the app already created itself
-- controller-managed child contexts created through `POST /thread/spawn-child`
-
-Shared behavior:
-
-- each child has its own `conversationId`
-- the parent can inspect children through `/thread/debug-context`, `/thread/state`, and `/thread/children`
-- a clean child can keep its own context across multiple turns
-- follow-up work can be sent back into that same child conversation id
-
-Important distinction:
-
-- native children show up as real app-native child relationships
-- controller-managed children are surfaced with `managedByThreadController: true` and `nativeChild: false`
-
-This is different from opening an unrelated external thread. The parent remains the manager while the child acts as a separate execution lane.
-
-Important operating rule:
-
-- do not copy the full parent transcript into the child by default
-- use a clean child context as the default path
-
-Detailed behavior and limits: [CHILD_CONTEXTS.md](CHILD_CONTEXTS.md)
+- Follow-up text on a bound session goes through the app-native follow-up submit path.
+- Session switching mirrors the latest 5 instruction/result groups.
 
 ## Message and media behavior
 
 - Plain Telegram text is injected as a Codex user turn.
+- Bound-session Telegram text is serialized:
+  - one Telegram message maps to one Codex input
+  - messages sent while Codex is still processing are queued
+  - queued messages are submitted to Codex one at a time
+- repeated Telegram deliveries are suppressed by `update_id` and `chat_id:message_id`
 - Telegram documents are staged locally and passed as attachments.
 - Telegram images are staged locally and injected through the app-native local-image input path.
+- Telegram image turns use the same serialized bound-session queue as text turns.
+- If a media turn is visibly handed off to Codex but the bound submit completion times out, it is not retried as a duplicate input.
+- Codex image echoes can be mirrored back to Telegram even when the app exposes them as `data:image/...` URLs.
 - Codex app conversation output is mirrored back to Telegram in real time.
 - Mirrored assistant responses preserve common Markdown-style formatting in Telegram.
-- Mirrored user/app echo stays plain text on purpose.
+- Mirrored user/app echo stays plain text.
 
 ## Official-app workflow
 
@@ -66,35 +45,14 @@ Detailed behavior and limits: [CHILD_CONTEXTS.md](CHILD_CONTEXTS.md)
 - Re-register the local package copy under the same `OpenAI.Codex` identity and launch it.
 - If a Microsoft Store update is blocked by the local dev registration, run the recovery flow that reinstalls the official Store package first and then reapplies the Telegram patch.
 
-## Account behavior
+## Current maintained boundary
 
-- This workflow assumes you already use the official Codex app normally.
-- Sign into the official app first, then patch the local copy.
-- If you use ChatGPT Pro on chatgpt.com, sign into the Codex app with that same account before patching.
-- On the official website, ChatGPT Pro also includes Codex and ChatGPT agent; use `agent mode` or `/agent` there if you want the official web flow.
-- The Telegram-driven path continues through that same signed-in app session.
-- Telegram is a control surface for that app session, not a replacement auth path.
+This repo now keeps the `v30` feature line only.
 
-See [WINDOWS_OFFICIAL_APP_SETUP.md](WINDOWS_OFFICIAL_APP_SETUP.md) for the full setup flow.
+Included:
 
-## Safety model
-
-- Telegram access is restricted by `allowedChatIds`.
-- Bot token, bindings, logs, runtime state, and repo-local operator notes stay local and are excluded from git.
-- The repository does **not** include OpenAI binaries, extracted proprietary bundles, or rebuilt deploy roots.
-
-See [SECURITY.md](SECURITY.md) for publish rules and token-handling guidance.
-
-## Current limits
-
-- Verified against the 2026-03-24 Microsoft Store source package `26.313.5234.0`, re-registered locally as package `26.313.5234.35`.
-- The patcher depends on the current minified renderer and main bundle anchors.
-- If OpenAI changes the bundle shape, the patch scripts may need updates.
-- The live replace step intentionally stops the running Codex app and re-registers the local package copy.
-- The recovery flow depends on Microsoft Store being able to reinstall the official package for the current user, with a valid Store sign-in and working network access.
-- Controller-managed child spawn is a working app-side control surface, but it is still not the same thing as exposing the app's internal `spawnAgent(...)` primitive directly.
-
-## Archived reference
-
-- Portable-specific scripts still exist in the repo as archived reference only.
-- The supported public workflow is the official-app path described above.
+- Telegram sync
+- native app commands
+- approval relay
+- session/replay behavior
+- official Store patch workflow

@@ -15,6 +15,9 @@ $stagedPackageRoot = Join-Path $WorkspaceRoot 'staging\package_root_telegram'
 $sourceAsar = Join-Path $WorkspaceRoot 'staging\app.telegram.official.asar'
 $targetAsar = Join-Path $stagedPackageRoot 'app\resources\app.asar'
 $targetExe = Join-Path $stagedPackageRoot 'app\Codex.exe'
+$overrideSource = Join-Path $repoRoot 'patch\telegram-native.js'
+$overrideDir = Join-Path $stagedPackageRoot 'app\resources\native'
+$overrideTarget = Join-Path $overrideDir 'telegram-native-override.js'
 
 function Invoke-External {
   param(
@@ -54,6 +57,8 @@ if (-not (Test-Path $sourceAsar)) {
 New-Item -ItemType Directory -Force (Split-Path -Parent $stagedPackageRoot) | Out-Null
 robocopy $sourcePackageRoot $stagedPackageRoot /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
 Copy-Item $sourceAsar $targetAsar -Force
+New-Item -ItemType Directory -Force $overrideDir | Out-Null
+Copy-Item $overrideSource $overrideTarget -Force
 
 Push-Location $repoRoot
 try {
@@ -79,3 +84,4 @@ Write-Output "OFFICIAL_STAGE_PACKAGE_ASAR $targetAsar"
 Write-Output "OFFICIAL_STAGE_PACKAGE_ASAR_SHA256 $($asarHash.Hash)"
 Write-Output "OFFICIAL_STAGE_PACKAGE_EXE $targetExe"
 Write-Output "OFFICIAL_STAGE_PACKAGE_EXE_SHA256 $($exeHash.Hash)"
+Write-Output "OFFICIAL_STAGE_PACKAGE_OVERRIDE $overrideTarget"
