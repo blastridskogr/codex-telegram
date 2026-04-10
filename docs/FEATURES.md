@@ -16,6 +16,7 @@ It does **not** replace Codex with a separate bot backend. Telegram drives the s
 - `/codex_new` opens the real Codex new-thread flow.
 - The first Telegram message after `/codex_new` creates the real thread and auto-binds the returned `conversationId`.
 - Follow-up text on a bound session goes through the app-native follow-up submit path.
+- Session switching starts with a project picker, then shows recent sessions for that project.
 - Session switching mirrors the latest 5 instruction/result groups.
 
 ## Message and media behavior

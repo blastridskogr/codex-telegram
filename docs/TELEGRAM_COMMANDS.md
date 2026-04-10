@@ -16,7 +16,7 @@ The runtime separates general bot commands from Codex control commands.
 | `/codex_controls` | open the main Codex control keyboard |
 | `/codex_current` | show current session, model, Fast mode, reasoning, permission |
 | `/codex_new [prompt]` | open a real native Codex new-thread flow |
-| `/codex_session` | open the recent-session picker |
+| `/codex_session` | open the project picker, then a project-specific recent-session picker |
 | `/codex_unbind` | remove the current chat binding |
 
 Compatibility redirects:
@@ -36,7 +36,8 @@ Behavior:
 - the first Telegram message after `/codex_new` creates the real thread through Codex and auto-binds the returned `conversationId`
 - after `/codex_session`, plain Telegram follow-up text is submitted through the app-native bound-thread follow-up path
 - bind/switch actions open the real Codex conversation in the app before Telegram treats the binding as live
-- the picker shows `session title + session id + last activity`
+- the first picker groups recent sessions by project path
+- the project-specific picker shows `session title + session id + last activity`
 - when you switch sessions, the latest 5 instruction/result groups are mirrored back into Telegram as display-only chat output, oldest-to-newest within that latest set
 - completed results stay preferred, but a newer assistant progress/commentary block can replay as a partial group when no final summary has been stored yet
 - the history replay does **not** cost extra model tokens

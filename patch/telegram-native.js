@@ -799,6 +799,7 @@ function extractSessionIdFromName(fileName) {
 }
 
 const SESSION_CATALOG_HEAD_BYTES = 256 * 1024;
+const SESSION_CATALOG_PROJECT_HEAD_BYTES = 64 * 1024;
 const SESSION_CATALOG_TAIL_BYTES = 256 * 1024;
 
 function readFileTailUtf8(filePath, maxBytes = SESSION_CATALOG_TAIL_BYTES) {
@@ -1014,6 +1015,44 @@ function extractPreviewFromSessionTail(tail) {
         } catch {}
     }
     return truncatePreview(fallback);
+}
+
+function normalizeProjectPath(cwd) {
+    const value = String(cwd || "").trim();
+    if (!value) {
+        return "";
+    }
+    return path.normalize(value);
+}
+
+function buildProjectKey(cwd) {
+    const normalized = normalizeProjectPath(cwd);
+    if (!normalized) {
+        return "unknown";
+    }
+    return crypto.createHash("sha1").update(normalized.toLowerCase()).digest("hex").slice(0, 12);
+}
+
+function buildProjectLabel(cwd) {
+    const normalized = normalizeProjectPath(cwd);
+    if (!normalized) {
+        return "(unknown project)";
+    }
+    return path.basename(normalized) || normalized;
+}
+
+function extractProjectCwdFromSessionHead(head) {
+    const lines = head.split(/\r?\n/).filter(Boolean);
+    for (const line of lines) {
+        try {
+            const parsed = JSON.parse(line);
+            const cwd = parsed?.payload?.cwd;
+            if (typeof cwd === "string" && cwd.trim()) {
+                return normalizeProjectPath(cwd);
+            }
+        } catch {}
+    }
+    return "";
 }
 
 function buildSandboxPolicy(kind, workspaceRoots) {
@@ -1680,12 +1719,16 @@ class SessionCatalog {
         try {
             const head = readFileHeadUtf8(entry.filePath);
             const tail = readFileTailUtf8(entry.filePath);
+            const projectCwd = extractProjectCwdFromSessionHead(head);
             return {
                 sessionId: entry.sessionId,
                 filePath: entry.filePath,
                 modifiedAt: new Date(entry.mtimeMs),
                 title: extractTitleFromSessionHead(head),
                 preview: extractPreviewFromSessionTail(tail),
+                projectCwd,
+                projectKey: buildProjectKey(projectCwd),
+                projectLabel: buildProjectLabel(projectCwd),
             };
         } catch (error) {
             this.logger.warn(`session catalog parse failed for ${entry.filePath}: ${formatError(error)}`);
@@ -1695,11 +1738,20 @@ class SessionCatalog {
                 modifiedAt: new Date(entry.mtimeMs),
                 title: "(untitled session)",
                 preview: "(preview unavailable)",
+                projectCwd: "",
+                projectKey: "unknown",
+                projectLabel: "(unknown project)",
             };
         }
     }
 
     listRecentSessions(limit = DEFAULT_RECENT_SESSION_LIMIT) {
+        return this.collectUniqueSessionFiles()
+            .slice(0, limit)
+            .map((entry) => this.describeSessionEntry(entry));
+    }
+
+    collectUniqueSessionFiles() {
         const files = this.collectSessionFiles();
         const uniqueFiles = [];
         const seenSessionIds = new Set();
@@ -1710,10 +1762,51 @@ class SessionCatalog {
             seenSessionIds.add(entry.sessionId);
             uniqueFiles.push(entry);
         }
+        return uniqueFiles;
+    }
 
-        return uniqueFiles
-            .slice(0, limit)
-            .map((entry) => this.describeSessionEntry(entry));
+    describeSessionProject(entry) {
+        try {
+            const head = readFileHeadUtf8(entry.filePath, SESSION_CATALOG_PROJECT_HEAD_BYTES);
+            const projectCwd = extractProjectCwdFromSessionHead(head);
+            return {
+                sessionId: entry.sessionId,
+                modifiedAt: new Date(entry.mtimeMs),
+                projectCwd,
+                projectKey: buildProjectKey(projectCwd),
+                projectLabel: buildProjectLabel(projectCwd),
+            };
+        } catch (error) {
+            this.logger.warn(`session project parse failed for ${entry.filePath}: ${formatError(error)}`);
+            return {
+                sessionId: entry.sessionId,
+                modifiedAt: new Date(entry.mtimeMs),
+                projectCwd: "",
+                projectKey: "unknown",
+                projectLabel: "(unknown project)",
+            };
+        }
+    }
+
+    listRecentProjects() {
+        const sessions = this.collectUniqueSessionFiles().map((entry) => this.describeSessionProject(entry));
+        const projects = new Map();
+        for (const session of sessions) {
+            const key = session.projectKey || "unknown";
+            const current = projects.get(key) || {
+                key,
+                label: session.projectLabel || "(unknown project)",
+                cwd: session.projectCwd || "",
+                latestAt: session.modifiedAt,
+                count: 0,
+            };
+            current.count += 1;
+            if (session.modifiedAt > current.latestAt) {
+                current.latestAt = session.modifiedAt;
+            }
+            projects.set(key, current);
+        }
+        return [...projects.values()].sort((a, b) => b.latestAt - a.latestAt);
     }
 
     findSessionEntry(sessionId) {
@@ -3247,13 +3340,37 @@ class CodexAppDirectCompanion {
         return true;
     }
 
-    buildSessionPicker(chatId) {
-        const sessions = this.catalog.listRecentSessions();
+    buildProjectPicker(chatId) {
+        const projects = this.catalog.listRecentProjects();
+        if (!projects.length) {
+            return { text: "No recent Codex projects were found.", replyMarkup: null };
+        }
+        const lines = ["Recent projects:"];
+        const keyboard = [];
+        for (const [index, project] of projects.entries()) {
+            lines.push(`${index + 1}. ${project.label} (${project.count})`);
+            if (project.cwd) {
+                lines.push(`   ${project.cwd}`);
+            }
+            lines.push(`   latest: ${formatSessionTimestamp(project.latestAt)}`);
+            keyboard.push([{ text: `${index + 1}. ${truncateButtonLabel(project.label)}`, callback_data: `project:${project.key}` }]);
+        }
+        lines.push("");
+        lines.push("Choose a project first, then choose a session.");
+        return { text: lines.join("\n"), replyMarkup: { inline_keyboard: keyboard } };
+    }
+
+    buildSessionPicker(chatId, projectKey = null) {
+        const entries = this.catalog.collectUniqueSessionFiles()
+            .filter((entry) => !projectKey || this.catalog.describeSessionProject(entry).projectKey === projectKey)
+            .slice(0, DEFAULT_RECENT_SESSION_LIMIT);
+        const sessions = entries.map((entry) => this.catalog.describeSessionEntry(entry));
         const currentSession = this.bindings.getSession(chatId);
         if (!sessions.length) {
-            return { text: "No recent Codex sessions were found.", replyMarkup: null };
+            return { text: "No recent Codex sessions were found for this project.", replyMarkup: null };
         }
-        const lines = ["Recent sessions:"];
+        const project = sessions[0]?.projectLabel || null;
+        const lines = [project ? `Recent sessions in ${project}:` : "Recent sessions:"];
         const keyboard = [];
         for (const [index, session] of sessions.entries()) {
             const current = session.sessionId === currentSession ? " [current]" : "";
@@ -3262,6 +3379,9 @@ class CodexAppDirectCompanion {
             lines.push(`   ${session.sessionId}`);
             lines.push(`   ${formatSessionTimestamp(session.modifiedAt)} | ${session.preview}`);
             keyboard.push([{ text: `${index + 1}. ${truncateButtonLabel(title)}`, callback_data: `set:session:${session.sessionId}` }]);
+        }
+        if (projectKey) {
+            keyboard.push([{ text: "Back to projects", callback_data: "menu:session" }]);
         }
         lines.push("");
         lines.push("Choose a button to switch the current chat session.");
@@ -3323,7 +3443,7 @@ class CodexAppDirectCompanion {
     }
 
     async showSessionPicker(chatId) {
-        const picker = this.buildSessionPicker(chatId);
+        const picker = this.buildProjectPicker(chatId);
         if (picker.replyMarkup) {
             await this.api.sendMessageWithMarkup(chatId, picker.text, picker.replyMarkup);
             return;
@@ -3332,7 +3452,7 @@ class CodexAppDirectCompanion {
     }
 
     async promptForBinding(chatId, prefixText = NO_SESSION_PICKER_MESSAGE) {
-        const picker = this.buildSessionPicker(chatId);
+        const picker = this.buildProjectPicker(chatId);
         if (picker.replyMarkup) {
             const text = `${prefixText}\n\n${picker.text}`;
             await this.api.sendMessageWithMarkup(chatId, text, picker.replyMarkup);
@@ -3652,6 +3772,17 @@ class CodexAppDirectCompanion {
         if (data.startsWith("session:")) {
             const sessionId = data.slice("session:".length).trim();
             await this.bindChatToSession(chatId, sessionId, callbackId, callbackMessageId);
+            return;
+        }
+        if (data.startsWith("project:")) {
+            const projectKey = data.slice("project:".length).trim();
+            await this.safeAnswerCallbackQuery(callbackId, "Opening project sessions", `open_project:${projectKey}`);
+            const picker = this.buildSessionPicker(chatId, projectKey);
+            if (picker.replyMarkup) {
+                await this.api.sendMessageWithMarkup(chatId, picker.text, picker.replyMarkup);
+            } else {
+                await this.api.sendMessage(chatId, picker.text);
+            }
             return;
         }
         if (data.startsWith("approval:")) {
